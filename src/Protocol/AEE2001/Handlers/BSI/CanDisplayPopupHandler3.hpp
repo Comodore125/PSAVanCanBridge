@@ -253,6 +253,17 @@ class CanDisplayPopupHandler3
         isPopupVisible = true;
     }
 
+
+    uint8_t GetVisibleMessageType()
+    {
+        if (isDoorMessageVisible)
+        {
+            return currentDoorMessage.MessageType;
+        }
+
+        return currentPopupMessage.MessageType;
+    }
+
     void HideCurrentPopupMessage(unsigned long currentTime)
     {
         if (isPopupVisible)
@@ -264,7 +275,7 @@ class CanDisplayPopupHandler3
             byte3.data.priority = 1;
 
             _carState->DisplayMessage.data.Field1 = CAN_POPUP_MSG_HIDE;
-            _carState->DisplayMessage.data.Field2 = currentPopupMessage.MessageType;
+            _carState->DisplayMessage.data.Field2 = GetVisibleMessageType();
             _carState->DisplayMessage.data.Field3 = byte3.asByte;
             _carState->DisplayMessage.data.Field4 = 0x00;
             _carState->DisplayMessage.data.Field5 = 0xFF;
