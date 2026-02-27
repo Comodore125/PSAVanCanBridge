@@ -55,6 +55,7 @@ class CanDisplayPopupHandler3
         currentPopupMessage.MessageType = CAN_POPUP_MSG_NONE;
         currentPopupMessage.Category = CAN_POPUP_MSG_SHOW_CATEGORY3;
         currentDoorMessage.DoorStatus1 = 0x00;
+        currentDoorMessage.DoorStatus2 = 0x00;
     }
 
     void QueueNewMessage(unsigned long currentTime, CanDisplayPopupItem incomingPopupMessage)
@@ -103,12 +104,13 @@ class CanDisplayPopupHandler3
         if (isIncomingDoorMessage)
         {
             //ShowDebugMessage("isIncomingDoorMessage");
-            const uint8_t prevDoorStatus = currentDoorMessage.DoorStatus1;
+            const uint8_t prevDoorStatus1 = currentDoorMessage.DoorStatus1;
+            const uint8_t prevDoorStatus2 = currentDoorMessage.DoorStatus2;
             currentDoorMessage = incomingPopupMessage;
 
             if (isDoorMessageVisible)
             {
-                if (incomingPopupMessage.DoorStatus1 != prevDoorStatus)
+                if (incomingPopupMessage.DoorStatus1 != prevDoorStatus1 || incomingPopupMessage.DoorStatus2 != prevDoorStatus2)
                 {
                     ShowDebugMessage("HidePreviousDoorMessage");
                     HideCurrentPopupMessage(currentTime);
@@ -151,7 +153,7 @@ class CanDisplayPopupHandler3
         ShowDebugMessage("Process");
         if (DoorMessageCanBeDisplayed())
         {
-            if (currentDoorMessage.DoorStatus1 != 0x00)
+            if (currentDoorMessage.DoorStatus1 != 0x00 || currentDoorMessage.DoorStatus2 != 0x00)
             {
                 ShowDebugMessage("ShowCurrentDoorMessage1");
                 ShowPopupMessage(currentDoorMessage);
@@ -170,7 +172,7 @@ class CanDisplayPopupHandler3
 
                 if (DoorMessageCanBeDisplayed())
                 {
-                    if (currentDoorMessage.DoorStatus1 != 0x00)
+                    if (currentDoorMessage.DoorStatus1 != 0x00 || currentDoorMessage.DoorStatus2 != 0x00)
                     {
                         ShowDebugMessage("ShowCurrentDoorMessage2");
                         ShowPopupMessage(currentDoorMessage);
@@ -294,6 +296,7 @@ class CanDisplayPopupHandler3
         currentPopupMessage.MessageType = CAN_POPUP_MSG_NONE;
         currentPopupMessage.Category = CAN_POPUP_MSG_SHOW_CATEGORY3;
         currentDoorMessage.DoorStatus1 = 0x00;
+        currentDoorMessage.DoorStatus2 = 0x00;
 
         for (size_t i = 0; i < 256; i++)
         {
