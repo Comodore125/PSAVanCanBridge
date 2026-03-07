@@ -10,6 +10,7 @@
 #include "CarRadioRemote.h"
 #include "AirConditionerState.h"
 #include "DisplayMessage.h"
+#include "DoorPopupDebugState.hpp"
 #include "ParkingAidStatus.h"
 #include "CarSettings.h"
 #include "AvailableOptions_2010.h"
@@ -78,6 +79,7 @@ struct CarState
 
     //1A1
     DisplayMessageStruct DisplayMessage{};
+    DoorPopupDebugState DoorPopupDebug{};
 
     //1E3
     AirConditionerState AirConditionerStatus{};

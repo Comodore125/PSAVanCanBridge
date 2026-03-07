@@ -210,11 +210,80 @@
         #confirmButtons {
             text-align: right;
         }
+
+
+        .debug-panel {
+            margin-top: 20px;
+            padding: 12px;
+            border: 1px solid #cfd8dc;
+            border-radius: 8px;
+            background-color: #ffffff;
+        }
+
+        .debug-panel.hidden {
+            display: none;
+        }
+
+        .debug-status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .debug-status-item {
+            padding: 8px;
+            background: #f5f7fa;
+            border-radius: 6px;
+        }
+
+        .debug-bytes {
+            font-family: monospace;
+            font-size: 0.95rem;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .debug-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 0.92rem;
+        }
+
+        .debug-table th,
+        .debug-table td {
+            border: 1px solid #d7dde3;
+            padding: 6px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .debug-table tr.active-row {
+            background-color: #e8f1ff;
+        }
+
+        .debug-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .debug-controls button {
+            width: auto;
+            flex: 1 1 180px;
+            margin-top: 0;
+        }
     </style>
 
     <script type="text/javascript">
         const apiEndpoint = 'api/';
         let jsonData = {};
+        let doorPopupDebugStatus = null;
+        let doorPopupDebugPollTimer = null;
+        let doorPopupDebugChecks = {};
+
 
         dictionary = {
             "SOURCE_PROTOCOL": {
@@ -923,6 +992,178 @@ Continue?
             }
         }
 
+        function toHexByte(value) {
+            return '0x' + Number(value || 0).toString(16).toUpperCase().padStart(2, '0');
+        }
+
+        function formatDisplayBytes(bytes) {
+            if (!Array.isArray(bytes)) {
+                return '';
+            }
+            return bytes.map(toHexByte).join(' ');
+        }
+
+        function updateDoorPopupDebugSummary(status) {
+            const summary = document.getElementById('door-popup-debug-summary');
+            const bytes = document.getElementById('door-popup-debug-bytes');
+            const hint = document.getElementById('door-popup-debug-hint');
+            if (!summary || !bytes || !hint || !status) {
+                return;
+            }
+
+            const stateLabel = status.current_state_label || '-';
+            const phaseLabel = status.show_phase ? 'showing popup' : 'sending hide frame';
+            const runtime = `${Math.floor((status.elapsed_total_ms || 0) / 1000)}.${String(Math.floor(((status.elapsed_total_ms || 0) % 1000) / 100)).padStart(1, '0')} s`;
+            const phaseTime = `${Math.floor((status.elapsed_phase_ms || 0) / 1000)}.${String(Math.floor(((status.elapsed_phase_ms || 0) % 1000) / 100)).padStart(1, '0')} s / ${Math.floor((status.phase_duration_ms || 0) / 1000)} s`;
+
+            if (status.active) {
+                summary.textContent = `Cycle active: ${stateLabel} (${phaseLabel})`;
+            } else if (status.finished) {
+                summary.textContent = 'Cycle finished. Start it again whenever you want.';
+            } else {
+                summary.textContent = 'Cycle inactive.';
+            }
+
+            bytes.textContent = formatDisplayBytes(status.current_display || []);
+            hint.textContent = `Elapsed total: ${runtime} | Elapsed phase: ${phaseTime} | Ignition: ${status.ignition ? 'on' : 'off'} | Destination EMF emulation: ${status.emulate_display_on_destination ? 'on' : 'off'}`;
+        }
+
+        function renderDoorPopupDebugChecklist(status) {
+            const body = document.getElementById('door-popup-debug-checklist-body');
+            if (!body || !status || !Array.isArray(status.presets)) {
+                return;
+            }
+
+            const seen = new Set();
+            (status.log || []).forEach((entry) => {
+                if (entry.phase === 'show') {
+                    seen.add(entry.preset_index);
+                }
+            });
+
+            body.innerHTML = '';
+            status.presets.forEach((preset) => {
+                const tr = document.createElement('tr');
+                if (status.active && preset.index === status.current_preset_index) {
+                    tr.classList.add('active-row');
+                }
+
+                const checkId = `door-popup-debug-check-${preset.index}`;
+                if (!(checkId in doorPopupDebugChecks)) {
+                    doorPopupDebugChecks[checkId] = false;
+                }
+
+                tr.innerHTML = `
+                    <td>${preset.index + 1}</td>
+                    <td>${preset.label}</td>
+                    <td>${toHexByte(preset.door_status1)} / ${toHexByte(preset.door_status2)}</td>
+                    <td>${seen.has(preset.index) ? 'yes' : 'no'}</td>
+                    <td><input type="checkbox" id="${checkId}" ${doorPopupDebugChecks[checkId] ? 'checked' : ''}></td>
+                `;
+                body.appendChild(tr);
+                const checkbox = document.getElementById(checkId);
+                checkbox.addEventListener('change', (event) => {
+                    doorPopupDebugChecks[checkId] = event.target.checked;
+                });
+            });
+        }
+
+        function renderDoorPopupDebugLog(status) {
+            const body = document.getElementById('door-popup-debug-log-body');
+            if (!body || !status || !Array.isArray(status.log)) {
+                return;
+            }
+
+            body.innerHTML = '';
+            status.log.forEach((entry) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${entry.sequence}</td>
+                    <td>${entry.state_label}</td>
+                    <td>${entry.phase}</td>
+                    <td>${formatDisplayBytes(entry.display || [])}</td>
+                    <td>${entry.timestamp_ms}</td>
+                `;
+                body.appendChild(tr);
+            });
+        }
+
+        function renderDoorPopupDebugStatus(status) {
+            const panel = document.getElementById('door-popup-debug-panel');
+            if (!panel) {
+                return;
+            }
+
+            if (status && (status.active || status.finished || (status.log && status.log.length > 0))) {
+                panel.classList.remove('hidden');
+            }
+
+            updateDoorPopupDebugSummary(status);
+            renderDoorPopupDebugChecklist(status);
+            renderDoorPopupDebugLog(status);
+        }
+
+        async function fetchDoorPopupDebugStatus() {
+            const response = await fetch(apiEndpoint + 'debug/doorPopup/status', {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`Failed to fetch door popup debug status: ${response.statusText}`);
+            }
+
+            doorPopupDebugStatus = await response.json();
+            renderDoorPopupDebugStatus(doorPopupDebugStatus);
+            return doorPopupDebugStatus;
+        }
+
+        function ensureDoorPopupDebugPolling() {
+            if (doorPopupDebugPollTimer !== null) {
+                return;
+            }
+
+            doorPopupDebugPollTimer = setInterval(async () => {
+                try {
+                    const status = await fetchDoorPopupDebugStatus();
+                    if (status && !status.active && !status.finished) {
+                    }
+                } catch (error) {
+                    console.error('Door popup debug polling failed:', error);
+                }
+            }, 500);
+        }
+
+        async function startDoorPopupDebug() {
+            const panel = document.getElementById('door-popup-debug-panel');
+            if (panel) {
+                panel.classList.remove('hidden');
+            }
+
+            await fetch(apiEndpoint + 'debug/doorPopup/start', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            doorPopupDebugChecks = {};
+            ensureDoorPopupDebugPolling();
+            await fetchDoorPopupDebugStatus();
+        }
+
+        async function stopDoorPopupDebug() {
+            await fetch(apiEndpoint + 'debug/doorPopup/stop', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            await fetchDoorPopupDebugStatus();
+        }
+
         document.addEventListener('DOMContentLoaded', function () {
             setInterval(async () =>
                 {
@@ -959,6 +1200,16 @@ Continue?
             const getVinButton = document.getElementById('getVin');
             if (getVinButton) {
                 getVinButton.addEventListener('click', getVin);
+            }
+
+            const startDoorPopupDebugButton = document.getElementById('startDoorPopupDebug');
+            if (startDoorPopupDebugButton) {
+                startDoorPopupDebugButton.addEventListener('click', startDoorPopupDebug);
+            }
+
+            const stopDoorPopupDebugButton = document.getElementById('stopDoorPopupDebug');
+            if (stopDoorPopupDebugButton) {
+                stopDoorPopupDebugButton.addEventListener('click', stopDoorPopupDebug);
             }
 
             async function fetchConfig() {
@@ -1241,6 +1492,8 @@ Continue?
                 saveConfigToDevice();
             });
 
+            ensureDoorPopupDebugPolling();
+            fetchDoorPopupDebugStatus().catch((error) => console.error(error));
             fetchConfig();
         });
     </script>
@@ -1308,6 +1561,48 @@ Continue?
         <div>
             <p id="rtc-time">RTC time: <span id="rtc-time-value"></span></p>
             <p>Firmware version: <span id="firmware-version-value">v3.0.1</span></p>
+        </div>
+        <div class="debug-panel hidden" id="door-popup-debug-panel">
+            <h3>Door popup debug</h3>
+            <p id="door-popup-debug-summary">Cycle inactive.</p>
+            <p id="door-popup-debug-hint"></p>
+            <p class="debug-bytes" id="door-popup-debug-bytes"></p>
+            <div class="debug-controls">
+                <button type="button" id="startDoorPopupDebug">Start door popup debug cycle</button>
+                <button type="button" id="stopDoorPopupDebug">Stop door popup debug cycle</button>
+            </div>
+            <div class="debug-status-grid">
+                <div class="debug-status-item">Show phase: 5 s</div>
+                <div class="debug-status-item">Silence phase: 3 s</div>
+                <div class="debug-status-item">Preset count: 10</div>
+                <div class="debug-status-item">Scope: AEE2001 -> AEE2004 popup bytes</div>
+            </div>
+            <h3>Checklist</h3>
+            <table class="debug-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>State</th>
+                        <th>Door bytes</th>
+                        <th>Seen in log</th>
+                        <th>Checked</th>
+                    </tr>
+                </thead>
+                <tbody id="door-popup-debug-checklist-body"></tbody>
+            </table>
+            <h3>Realtime log</h3>
+            <table class="debug-table">
+                <thead>
+                    <tr>
+                        <th>Seq</th>
+                        <th>State</th>
+                        <th>Phase</th>
+                        <th>Display bytes</th>
+                        <th>Timestamp ms</th>
+                    </tr>
+                </thead>
+                <tbody id="door-popup-debug-log-body"></tbody>
+            </table>
         </div>
         <div class="footer">
             <p>PSA VAN-CAN Bridge - <a href="https://github.com/morcibacsi/PSAVanCanBridge">GitHub Repository</a></p>

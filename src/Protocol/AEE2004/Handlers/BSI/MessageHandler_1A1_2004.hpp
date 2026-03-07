@@ -35,14 +35,18 @@ class MessageHandler_1A1 : public IMessageHandler<MessageHandler_1A1>
 
         BusMessage Generate(CarState* carState)
         {
-            message.data[0] = carState->DisplayMessage.data.Field1;
-            message.data[1] = carState->DisplayMessage.data.Field2;
-            message.data[2] = carState->DisplayMessage.data.Field3;
-            message.data[3] = carState->DisplayMessage.data.Field4;
-            message.data[4] = carState->DisplayMessage.data.Field5;
-            message.data[5] = carState->DisplayMessage.data.Field6;
-            message.data[6] = carState->DisplayMessage.data.Field7;
-            message.data[7] = carState->DisplayMessage.data.Field8;
+            const auto& display = carState->DoorPopupDebug.overrideActive
+                ? carState->DoorPopupDebug.overrideDisplayMessage.data
+                : carState->DisplayMessage.data;
+
+            message.data[0] = display.Field1;
+            message.data[1] = display.Field2;
+            message.data[2] = display.Field3;
+            message.data[3] = display.Field4;
+            message.data[4] = display.Field5;
+            message.data[5] = display.Field6;
+            message.data[6] = display.Field7;
+            message.data[7] = display.Field8;
 
             return message;
         }

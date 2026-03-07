@@ -4,9 +4,12 @@
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
+#include <cstdio>
+#include <cstring>
 #include "../ConfigFile.hpp"
 #include "../TimeProvider.hpp"
 #include "../CarState.hpp"
+#include "../../Protocol/AEE2004/Structs/CanDisplayStructs.h"
 #include "gzipped_webpage_data.h"
 
 typedef esp_err_t (*my_httpd_handler_t)(httpd_req_t *req);
@@ -106,6 +109,9 @@ WebServer(
         RegisterHandler("/api/config.json", HTTP_GET, &WebServer::get_config_handler);
         RegisterHandler("/api/config", HTTP_POST, &WebServer::post_config_handler);
         RegisterHandler("/api/time", HTTP_POST, &WebServer::post_time_handler);
+        RegisterHandler("/api/debug/doorPopup/start", HTTP_POST, &WebServer::post_debug_door_popup_start_handler);
+        RegisterHandler("/api/debug/doorPopup/stop", HTTP_POST, &WebServer::post_debug_door_popup_stop_handler);
+        RegisterHandler("/api/debug/doorPopup/status", HTTP_GET, &WebServer::get_debug_door_popup_status_handler);
     }
 
     void UnRegisterEndpoints()
@@ -119,6 +125,9 @@ WebServer(
         httpd_unregister_uri_handler(server, "/api/config.json", HTTP_GET);
         httpd_unregister_uri_handler(server, "/api/config", HTTP_POST);
         httpd_unregister_uri_handler(server, "/api/time", HTTP_POST);
+        httpd_unregister_uri_handler(server, "/api/debug/doorPopup/start", HTTP_POST);
+        httpd_unregister_uri_handler(server, "/api/debug/doorPopup/stop", HTTP_POST);
+        httpd_unregister_uri_handler(server, "/api/debug/doorPopup/status", HTTP_GET);
     }
 
     // Start web server
@@ -363,8 +372,38 @@ WebServer(
         return ESP_OK;
     }
 
+    static esp_err_t post_debug_door_popup_start_handler(httpd_req_t *req)
+    {
+        auto *instance = static_cast<WebServer *>(req->user_ctx);
+        instance->_lastRequestTime = instance->_carState->CurrenTime;
+        instance->StartDoorPopupDebug(instance->_carState->CurrenTime);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{"status":"started"}");
+        return ESP_OK;
+    }
+
+    static esp_err_t post_debug_door_popup_stop_handler(httpd_req_t *req)
+    {
+        auto *instance = static_cast<WebServer *>(req->user_ctx);
+        instance->_lastRequestTime = instance->_carState->CurrenTime;
+        instance->StopDoorPopupDebug(instance->_carState->CurrenTime, false);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{"status":"stopped"}");
+        return ESP_OK;
+    }
+
+    static esp_err_t get_debug_door_popup_status_handler(httpd_req_t *req)
+    {
+        auto *instance = static_cast<WebServer *>(req->user_ctx);
+        instance->_lastRequestTime = instance->_carState->CurrenTime;
+        instance->SendDoorPopupDebugStatus(req);
+        return ESP_OK;
+    }
+
     void Process()
     {
+        ProcessDoorPopupDebug();
+
         if (_isRunning && server != nullptr)
         {
             if ((_carState->CurrenTime - _lastRequestTime) > _inactivityTimeout * 1000)
@@ -378,6 +417,297 @@ WebServer(
     }
 
 private:
+    struct DoorPopupDebugPreset
+    {
+        const char* key;
+        const char* label;
+        uint8_t doorStatus1;
+        uint8_t doorStatus2;
+    };
+
+    inline static constexpr uint32_t DoorPopupDebugShowDurationMs = 5000;
+    inline static constexpr uint32_t DoorPopupDebugHideDurationMs = 3000;
+    inline static constexpr uint8_t DoorPopupDebugPresetCount = 10;
+    inline static constexpr DoorPopupDebugPreset DoorPopupDebugPresets[DoorPopupDebugPresetCount] = {
+        { "front-left", "Front left", 0x40, 0x00 },
+        { "rear-left", "Rear left", 0x10, 0x00 },
+        { "front-left+rear-left+rear-right", "Front left + rear left + rear right", 0x70, 0x00 },
+        { "boot", "Boot", 0x08, 0x00 },
+        { "front-left+rear-left", "Front left + rear left", 0x50, 0x00 },
+        { "front-left+rear-right", "Front left + rear right", 0x60, 0x00 },
+        { "rear-left+rear-right", "Rear left + rear right", 0x30, 0x00 },
+        { "front-left+boot", "Front left + boot", 0x48, 0x00 },
+        { "rear-left+rear-right+boot", "Rear left + rear right + boot", 0x38, 0x00 },
+        { "front-left+rear-left+rear-right+boot", "Front left + rear left + rear right + boot", 0x78, 0x00 },
+    };
+
+    static void CopyText(char* target, size_t targetSize, const char* source)
+    {
+        if (target == nullptr || targetSize == 0)
+        {
+            return;
+        }
+        std::snprintf(target, targetSize, "%s", source != nullptr ? source : "");
+    }
+
+    static void BuildDoorPopupShowMessage(DisplayMessageStruct& displayMessage, uint8_t doorStatus1, uint8_t doorStatus2)
+    {
+        CanDisplayByte2Struct byte3{};
+        byte3.data.show_popup_on_emf = 1;
+        byte3.data.show_popup_on_cmb = 1;
+        byte3.data.show_popup_on_vth = 1;
+        byte3.data.priority = 1;
+
+        auto& display = displayMessage.data;
+        display.Field1 = CAN_POPUP_MSG_SHOW_CATEGORY1;
+        display.Field2 = CAN_POPUP_MSG_DOORS_BOOT_BONNET_REAR_SCREEN_AND_FUEL_TANK_OPEN;
+        display.Field3 = byte3.asByte;
+        display.Field4 = doorStatus1;
+        display.Field5 = doorStatus2;
+        display.Field6 = 0xFF;
+        display.Field7 = 0x00;
+        display.Field8 = 0x00;
+    }
+
+    static void BuildDoorPopupHideMessage(DisplayMessageStruct& displayMessage)
+    {
+        CanDisplayByte2Struct byte3{};
+        byte3.data.show_popup_on_emf = 0;
+        byte3.data.show_popup_on_cmb = 0;
+        byte3.data.show_popup_on_vth = 0;
+        byte3.data.priority = 1;
+
+        auto& display = displayMessage.data;
+        display.Field1 = CAN_POPUP_MSG_HIDE;
+        display.Field2 = CAN_POPUP_MSG_DOORS_BOOT_BONNET_REAR_SCREEN_AND_FUEL_TANK_OPEN;
+        display.Field3 = byte3.asByte;
+        display.Field4 = 0x00;
+        display.Field5 = 0xFF;
+        display.Field6 = 0xFF;
+        display.Field7 = 0xFF;
+        display.Field8 = 0xFF;
+    }
+
+    void AppendDoorPopupDebugLog(DoorPopupDebugState& debugState, uint64_t currentTime)
+    {
+        auto& logEntry = debugState.logEntries[debugState.logWriteIndex];
+        logEntry.valid = true;
+        logEntry.sequence = ++debugState.sequence;
+        logEntry.timestampMs = currentTime;
+        logEntry.presetIndex = debugState.currentPresetIndex;
+        logEntry.showPhase = debugState.showPhase;
+        logEntry.displayMessage = debugState.overrideDisplayMessage;
+
+        debugState.logWriteIndex = (debugState.logWriteIndex + 1) % DoorPopupDebugState::LogCapacity;
+        if (debugState.logCount < DoorPopupDebugState::LogCapacity)
+        {
+            ++debugState.logCount;
+        }
+    }
+
+    void ApplyDoorPopupDebugPhase(DoorPopupDebugState& debugState, uint64_t currentTime)
+    {
+        if (debugState.currentPresetIndex >= DoorPopupDebugPresetCount)
+        {
+            return;
+        }
+
+        const auto& preset = DoorPopupDebugPresets[debugState.currentPresetIndex];
+        debugState.currentDoorStatus1 = preset.doorStatus1;
+        debugState.currentDoorStatus2 = preset.doorStatus2;
+        CopyText(debugState.currentStateKey, sizeof(debugState.currentStateKey), preset.key);
+        CopyText(debugState.currentStateLabel, sizeof(debugState.currentStateLabel), preset.label);
+
+        if (debugState.showPhase)
+        {
+            BuildDoorPopupShowMessage(debugState.overrideDisplayMessage, preset.doorStatus1, preset.doorStatus2);
+        }
+        else
+        {
+            BuildDoorPopupHideMessage(debugState.overrideDisplayMessage);
+        }
+
+        debugState.overrideActive = true;
+        debugState.overrideReleaseAtMs = 0;
+        debugState.lastTransitionAtMs = currentTime;
+        debugState.lastFramePreparedAtMs = currentTime;
+        AppendDoorPopupDebugLog(debugState, currentTime);
+    }
+
+    void StartDoorPopupDebug(uint64_t currentTime)
+    {
+        if (_carState == nullptr)
+        {
+            return;
+        }
+
+        auto& debugState = _carState->DoorPopupDebug;
+        debugState.Reset();
+        debugState.enabled = true;
+        debugState.finished = false;
+        debugState.showPhase = true;
+        debugState.currentPresetIndex = 0;
+        debugState.presetCount = DoorPopupDebugPresetCount;
+        debugState.startedAtMs = currentTime;
+        debugState.phaseStartedAtMs = currentTime;
+        ApplyDoorPopupDebugPhase(debugState, currentTime);
+    }
+
+    void StopDoorPopupDebug(uint64_t currentTime, bool finished)
+    {
+        if (_carState == nullptr)
+        {
+            return;
+        }
+
+        auto& debugState = _carState->DoorPopupDebug;
+        debugState.enabled = false;
+        debugState.finished = finished;
+        debugState.showPhase = false;
+        debugState.lastTransitionAtMs = currentTime;
+        debugState.lastFramePreparedAtMs = currentTime;
+
+        if (!finished)
+        {
+            BuildDoorPopupHideMessage(debugState.overrideDisplayMessage);
+            debugState.overrideActive = true;
+            debugState.overrideReleaseAtMs = currentTime + 1000;
+            AppendDoorPopupDebugLog(debugState, currentTime);
+            return;
+        }
+
+        debugState.overrideActive = false;
+        debugState.overrideReleaseAtMs = 0;
+    }
+
+    void ProcessDoorPopupDebug()
+    {
+        if (_carState == nullptr)
+        {
+            return;
+        }
+
+        auto& debugState = _carState->DoorPopupDebug;
+        if (!debugState.enabled)
+        {
+            if (debugState.overrideActive && debugState.overrideReleaseAtMs != 0 && _carState->CurrenTime >= debugState.overrideReleaseAtMs)
+            {
+                debugState.overrideActive = false;
+                debugState.overrideReleaseAtMs = 0;
+            }
+            return;
+        }
+
+        const uint64_t currentTime = _carState->CurrenTime;
+        const uint64_t phaseDuration = debugState.showPhase ? DoorPopupDebugShowDurationMs : DoorPopupDebugHideDurationMs;
+        const uint64_t elapsedInPhase = currentTime - debugState.phaseStartedAtMs;
+
+        if (elapsedInPhase < phaseDuration)
+        {
+            return;
+        }
+
+        if (debugState.showPhase)
+        {
+            debugState.showPhase = false;
+            debugState.phaseStartedAtMs = currentTime;
+            ApplyDoorPopupDebugPhase(debugState, currentTime);
+            return;
+        }
+
+        const uint8_t nextPresetIndex = debugState.currentPresetIndex + 1;
+        if (nextPresetIndex >= DoorPopupDebugPresetCount)
+        {
+            StopDoorPopupDebug(currentTime, true);
+            return;
+        }
+
+        debugState.currentPresetIndex = nextPresetIndex;
+        debugState.showPhase = true;
+        debugState.phaseStartedAtMs = currentTime;
+        ApplyDoorPopupDebugPhase(debugState, currentTime);
+    }
+
+    void AddDisplayMessageArrayToJson(cJSON* json, const char* fieldName, const DisplayMessageStruct& displayMessage)
+    {
+        cJSON* array = cJSON_CreateArray();
+        const auto& display = displayMessage.data;
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field1));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field2));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field3));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field4));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field5));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field6));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field7));
+        cJSON_AddItemToArray(array, cJSON_CreateNumber(display.Field8));
+        cJSON_AddItemToObject(json, fieldName, array);
+    }
+
+    void SendDoorPopupDebugStatus(httpd_req_t *req)
+    {
+        httpd_resp_set_type(req, "application/json");
+
+        cJSON *json = cJSON_CreateObject();
+        const auto& debugState = _carState->DoorPopupDebug;
+
+        cJSON_AddBoolToObject(json, "active", debugState.enabled);
+        cJSON_AddBoolToObject(json, "finished", debugState.finished);
+        cJSON_AddBoolToObject(json, "show_phase", debugState.showPhase);
+        cJSON_AddBoolToObject(json, "ignition", _carState->Ignition != 0);
+        cJSON_AddBoolToObject(json, "emulate_display_on_destination", _carState->EMULATE_DISPLAY_ON_DESTINATION);
+        cJSON_AddNumberToObject(json, "current_preset_index", debugState.currentPresetIndex);
+        cJSON_AddNumberToObject(json, "preset_count", DoorPopupDebugPresetCount);
+        cJSON_AddStringToObject(json, "current_state_key", debugState.currentStateKey);
+        cJSON_AddStringToObject(json, "current_state_label", debugState.currentStateLabel);
+        cJSON_AddNumberToObject(json, "elapsed_total_ms", debugState.startedAtMs == 0 ? 0 : static_cast<double>(_carState->CurrenTime - debugState.startedAtMs));
+        cJSON_AddNumberToObject(json, "elapsed_phase_ms", debugState.phaseStartedAtMs == 0 ? 0 : static_cast<double>(_carState->CurrenTime - debugState.phaseStartedAtMs));
+        cJSON_AddNumberToObject(json, "phase_duration_ms", debugState.showPhase ? DoorPopupDebugShowDurationMs : DoorPopupDebugHideDurationMs);
+        cJSON_AddNumberToObject(json, "current_door_status1", debugState.currentDoorStatus1);
+        cJSON_AddNumberToObject(json, "current_door_status2", debugState.currentDoorStatus2);
+        AddDisplayMessageArrayToJson(json, "current_display", debugState.overrideDisplayMessage);
+
+        cJSON* presets = cJSON_CreateArray();
+        for (uint8_t i = 0; i < DoorPopupDebugPresetCount; ++i)
+        {
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "index", i);
+            cJSON_AddStringToObject(item, "key", DoorPopupDebugPresets[i].key);
+            cJSON_AddStringToObject(item, "label", DoorPopupDebugPresets[i].label);
+            cJSON_AddNumberToObject(item, "door_status1", DoorPopupDebugPresets[i].doorStatus1);
+            cJSON_AddNumberToObject(item, "door_status2", DoorPopupDebugPresets[i].doorStatus2);
+            cJSON_AddItemToArray(presets, item);
+        }
+        cJSON_AddItemToObject(json, "presets", presets);
+
+        cJSON* logEntries = cJSON_CreateArray();
+        const uint8_t oldestIndex = (debugState.logWriteIndex + DoorPopupDebugState::LogCapacity - debugState.logCount) % DoorPopupDebugState::LogCapacity;
+        for (uint8_t i = 0; i < debugState.logCount; ++i)
+        {
+            const uint8_t index = (oldestIndex + i) % DoorPopupDebugState::LogCapacity;
+            const auto& logEntry = debugState.logEntries[index];
+            if (!logEntry.valid)
+            {
+                continue;
+            }
+
+            cJSON* item = cJSON_CreateObject();
+            cJSON_AddNumberToObject(item, "sequence", logEntry.sequence);
+            cJSON_AddNumberToObject(item, "timestamp_ms", static_cast<double>(logEntry.timestampMs));
+            cJSON_AddNumberToObject(item, "preset_index", logEntry.presetIndex);
+            cJSON_AddStringToObject(item, "state_key", DoorPopupDebugPresets[logEntry.presetIndex].key);
+            cJSON_AddStringToObject(item, "state_label", DoorPopupDebugPresets[logEntry.presetIndex].label);
+            cJSON_AddStringToObject(item, "phase", logEntry.showPhase ? "show" : "hide");
+            AddDisplayMessageArrayToJson(item, "display", logEntry.displayMessage);
+            cJSON_AddItemToArray(logEntries, item);
+        }
+        cJSON_AddItemToObject(json, "log", logEntries);
+
+        const char *jsonResponse = cJSON_PrintUnformatted(json);
+        cJSON_Delete(json);
+        httpd_resp_sendstr(req, jsonResponse);
+        free((void *)jsonResponse);
+    }
+
     CarState* _carState = nullptr;
     ConfigFile* _configFile = nullptr;
     TimeProvider* _timeProvider = nullptr;
