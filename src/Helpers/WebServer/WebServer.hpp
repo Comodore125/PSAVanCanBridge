@@ -96,7 +96,12 @@ WebServer(
             .handler = handler,
             .user_ctx = this
         };
-        httpd_register_uri_handler(server, &uri_t);
+
+        esp_err_t err = httpd_register_uri_handler(server, &uri_t);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to register URI %s, err=%s", uri, esp_err_to_name(err));
+        }
     }
 
     void RegisterEndpoints()
@@ -135,21 +140,16 @@ WebServer(
         httpd_config_t config = HTTPD_DEFAULT_CONFIG();
         config.uri_match_fn = httpd_uri_match_wildcard;
         config.stack_size = 8192;
+        config.max_uri_handlers = 16;
+
         if (httpd_start(&server, &config) == ESP_OK)
         {
             RegisterEndpoints();
-
             ESP_LOGI(TAG, "Web server started");
-            printf("Web server started\n");
-            _isRunning = true;
-            _lastRequestTime = _carState->CurrenTime;
-            _inactivityTimeout = WIFI_INITIAL_TIMEOUT;
             return ESP_OK;
         }
-        ESP_LOGE(TAG, "Failed to start the web server");
         return ESP_FAIL;
     }
-
     // Stop web server
     void stopWebServer() {
         if (server) {
