@@ -378,7 +378,7 @@ WebServer(
         instance->_lastRequestTime = instance->_carState->CurrenTime;
         instance->StartDoorPopupDebug(instance->_carState->CurrenTime);
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, "{"status":"started"}");
+        httpd_resp_sendstr(req, "{\"status\":\"started\"}");
         return ESP_OK;
     }
 
@@ -388,7 +388,7 @@ WebServer(
         instance->_lastRequestTime = instance->_carState->CurrenTime;
         instance->StopDoorPopupDebug(instance->_carState->CurrenTime, false);
         httpd_resp_set_type(req, "application/json");
-        httpd_resp_sendstr(req, "{"status":"stopped"}");
+        httpd_resp_sendstr(req, "{\"status\":\"stopped\"}");
         return ESP_OK;
     }
 
