@@ -54,10 +54,12 @@ class CanDisplayPopupHandler3
 
         currentPopupMessage.MessageType = CAN_POPUP_MSG_NONE;
         currentPopupMessage.Category = CAN_POPUP_MSG_SHOW_CATEGORY3;
+        currentDoorMessage.MessageType = CAN_POPUP_MSG_DOORS_BOOT_BONNET_REAR_SCREEN_AND_FUEL_TANK_OPEN;
+        currentDoorMessage.Category = CAN_POPUP_MSG_SHOW_CATEGORY1;
         currentDoorMessage.DoorStatus1 = 0x00;
     }
 
-    void QueueNewMessage(unsigned long currentTime, CanDisplayPopupItem incomingPopupMessage)
+    void QueueNewMessage(unsigned long currentTime, const CanDisplayPopupItem& incomingPopupMessage)
     {
         ShowDebugMessage("QueueNewMessage");
         if (_carState == nullptr)
@@ -108,7 +110,7 @@ class CanDisplayPopupHandler3
 
             if (isDoorMessageVisible)
             {
-                if (incomingPopupMessage.DoorStatus1 != prevDoorStatus)
+                if (currentDoorMessage.DoorStatus1 != prevDoorStatus)
                 {
                     ShowDebugMessage("HidePreviousDoorMessage");
                     HideCurrentPopupMessage(currentTime);
@@ -156,6 +158,11 @@ class CanDisplayPopupHandler3
                 ShowDebugMessage("ShowCurrentDoorMessage1");
                 ShowPopupMessage(currentDoorMessage);
             }
+            else if (isDoorMessageVisible)
+            {
+                ShowDebugMessage("HideDoorMessageWhenNoDoorIsOpen");
+                HideCurrentPopupMessage(currentTime);
+            }
         }
         else
         {
@@ -199,7 +206,7 @@ class CanDisplayPopupHandler3
 
     }
 
-    void ShowPopupMessage(CanDisplayPopupItem message) {
+    void ShowPopupMessage(const CanDisplayPopupItem& message) {
         uint8_t byte7 = CanGetHighKmToDisplay(message.KmToDisplay);
         uint8_t byte8 = CanGetLowKmToDisplay(message.KmToDisplay);
 
@@ -209,14 +216,15 @@ class CanDisplayPopupHandler3
         byte3.data.show_popup_on_vth = 1;
         byte3.data.priority = 1;
 
-        _carState->DisplayMessage.data.Field1 = message.Category;
-        _carState->DisplayMessage.data.Field2 = message.MessageType;
-        _carState->DisplayMessage.data.Field3 = byte3.asByte;
-        _carState->DisplayMessage.data.Field4 = message.DoorStatus1;
-        _carState->DisplayMessage.data.Field5 = message.DoorStatus2;
-        _carState->DisplayMessage.data.Field6 = 0xFF;
-        _carState->DisplayMessage.data.Field7 = byte7;
-        _carState->DisplayMessage.data.Field8 = byte8;
+        auto& display = _carState->DisplayMessage.data;
+        display.Field1 = message.Category;
+        display.Field2 = message.MessageType;
+        display.Field3 = byte3.asByte;
+        display.Field4 = message.DoorStatus1;
+        display.Field5 = message.DoorStatus2;
+        display.Field6 = 0xFF;
+        display.Field7 = byte7;
+        display.Field8 = byte8;
 
         if (message.MessageType == CAN_POPUP_MSG_DOORS_BOOT_BONNET_REAR_SCREEN_AND_FUEL_TANK_OPEN)
         {
@@ -261,14 +269,18 @@ class CanDisplayPopupHandler3
             byte3.data.show_popup_on_vth = 0;
             byte3.data.priority = 1;
 
-            _carState->DisplayMessage.data.Field1 = CAN_POPUP_MSG_HIDE;
-            _carState->DisplayMessage.data.Field2 = currentPopupMessage.MessageType;
-            _carState->DisplayMessage.data.Field3 = byte3.asByte;
-            _carState->DisplayMessage.data.Field4 = 0x00;
-            _carState->DisplayMessage.data.Field5 = 0xFF;
-            _carState->DisplayMessage.data.Field6 = 0xFF;
-            _carState->DisplayMessage.data.Field8 = 0xFF;
-            _carState->DisplayMessage.data.Field8 = 0xFF;
+            const uint8_t popupTypeToHide =
+                isDoorMessageVisible ? currentDoorMessage.MessageType : currentPopupMessage.MessageType;
+
+            auto& display = _carState->DisplayMessage.data;
+            display.Field1 = CAN_POPUP_MSG_HIDE;
+            display.Field2 = popupTypeToHide;
+            display.Field3 = byte3.asByte;
+            display.Field4 = 0x00;
+            display.Field5 = 0xFF;
+            display.Field6 = 0xFF;
+            display.Field7 = 0xFF;
+            display.Field8 = 0xFF;
 
             isPopupVisible = false;
             isNonDoorMessageVisible = false;
@@ -293,6 +305,8 @@ class CanDisplayPopupHandler3
         ResetEspActivatedShown(currentTime);
         currentPopupMessage.MessageType = CAN_POPUP_MSG_NONE;
         currentPopupMessage.Category = CAN_POPUP_MSG_SHOW_CATEGORY3;
+        currentDoorMessage.MessageType = CAN_POPUP_MSG_DOORS_BOOT_BONNET_REAR_SCREEN_AND_FUEL_TANK_OPEN;
+        currentDoorMessage.Category = CAN_POPUP_MSG_SHOW_CATEGORY1;
         currentDoorMessage.DoorStatus1 = 0x00;
 
         for (size_t i = 0; i < 256; i++)

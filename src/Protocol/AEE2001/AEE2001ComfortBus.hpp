@@ -40,6 +40,10 @@ class AEE2001ComfortBus : public IProtocolHandler
     CanDisplayPopupHandler3* _canPopupHandler;
     TripComputerResetHelper* _tripComputerResetHelper;
 
+    static constexpr uint8_t DoorStatus1Mask = 0xFC;
+    static constexpr uint16_t ActiveDoorRefreshIntervalMs = 500;
+    uint64_t _nextDoorStatusRefreshTime = 0;
+
     ImmediateSignalCallback _immediateSignalCallback;
     FeedbackSignalCallback _feedbackSignalCallback;
 

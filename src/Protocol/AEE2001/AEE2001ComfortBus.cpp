@@ -172,6 +172,38 @@ void AEE2001ComfortBus::UpdateMessages(uint64_t currentTime)
     // Let the scheduler manage periodic sending.
     //printf("AEE2001ComfortBus::UpdateMessages\n");
     _schedulerForSourceNetwork->Update(currentTime, *_transportLayer);
+
+    if (_carState == nullptr || !_carState->EMULATE_DISPLAY_ON_SOURCE || !_carState->Ignition)
+    {
+        _nextDoorStatusRefreshTime = 0;
+        return;
+    }
+
+    const bool reverseNotEngaged = !_carState->IsReverseEngaged;
+    const bool reverseEngagedButParkingAidIsNotVanBusType =
+        (_carState->IsReverseEngaged == 1 && _carState->PARKING_AID_TYPE != 0x01);
+    const bool canQueryDoorState = reverseNotEngaged || reverseEngagedButParkingAidIsNotVanBusType;
+
+    if (!canQueryDoorState)
+    {
+        _nextDoorStatusRefreshTime = 0;
+        return;
+    }
+
+    const bool hasAnyDoorStatus1Open = (_carState->DoorStatus.asByte & DoorStatus1Mask) != 0x00;
+
+    if (!hasAnyDoorStatus1Open)
+    {
+        _nextDoorStatusRefreshTime = 0;
+        return;
+    }
+
+    if (_nextDoorStatusRefreshTime == 0 || currentTime >= _nextDoorStatusRefreshTime)
+    {
+        BusMessage msgToSend = std::get<MessageHandler_564>(handlers).Generate(_carState);
+        _transportLayer->SendMessage(msgToSend, true);
+        _nextDoorStatusRefreshTime = currentTime + ActiveDoorRefreshIntervalMs;
+    }
 }
 
 void AEE2001ComfortBus::ProcessImmediateSignal(ImmediateSignal signal)
