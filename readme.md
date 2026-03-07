@@ -1,4 +1,12 @@
 # PSA VAN-CAN protocol bridge
+## Build for me
+pio run -e esp32c6_v16
+pio run -e esp32c6_v16 -t uploadfs --upload-port COM6
+
+but maybe I build it with build_:esp32cl_v16.bat, no sure.
+In all honesty, this is still a pain point and I need to figure this out
+
+Possiby installing Platform IO VS CODE TOOls might be the way.
 
 ## Sponsorship
 

@@ -1562,13 +1562,16 @@ Continue?
             <p id="rtc-time">RTC time: <span id="rtc-time-value"></span></p>
             <p>Firmware version: <span id="firmware-version-value">v3.0.1</span></p>
         </div>
+        <div class="debug-controls">
+            <button type="button" id="startDoorPopupDebug">Start door popup debug cycle</button>
+        </div>
+
         <div class="debug-panel hidden" id="door-popup-debug-panel">
             <h3>Door popup debug</h3>
             <p id="door-popup-debug-summary">Cycle inactive.</p>
             <p id="door-popup-debug-hint"></p>
             <p class="debug-bytes" id="door-popup-debug-bytes"></p>
             <div class="debug-controls">
-                <button type="button" id="startDoorPopupDebug">Start door popup debug cycle</button>
                 <button type="button" id="stopDoorPopupDebug">Stop door popup debug cycle</button>
             </div>
             <div class="debug-status-grid">
