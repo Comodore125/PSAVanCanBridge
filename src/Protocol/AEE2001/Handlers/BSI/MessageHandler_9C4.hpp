@@ -53,6 +53,7 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
             carState->RadioRemote.data.scroll_position = packet.ScroolPosition;
 
             carState->RadioRemote.data.source          = packet.ButtonStatus.data.source;
+            carState->RadioRemote.data.command_valid   = packet.ButtonStatus.data.source;
             carState->RadioRemote.data.volume_minus    = packet.ButtonStatus.data.volume_minus;
             carState->RadioRemote.data.volume_plus     = packet.ButtonStatus.data.volume_plus;
             carState->RadioRemote.data.seek_up         = packet.ButtonStatus.data.seek_up;
