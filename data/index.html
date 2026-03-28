@@ -758,6 +758,36 @@
             return result;
         }
 
+        function toHexByte(value) {
+            return Number(value || 0).toString(16).toUpperCase().padStart(2, '0');
+        }
+
+        function getSourceDebugText(responeJson) {
+            const dbg8C4_0 = Number(responeJson.dbg_8c4_0 || 0);
+            const dbg8C4_1 = Number(responeJson.dbg_8c4_1 || 0);
+            const dbg8C4_2 = Number(responeJson.dbg_8c4_2 || 0);
+            const dbg9C4_0 = Number(responeJson.dbg_9c4_0 || 0);
+            const dbg9C4_1 = Number(responeJson.dbg_9c4_1 || 0);
+
+            const eventSrc = dbg8C4_0 & 0x1F;
+            const eventRadio = (dbg8C4_1 >> 2) & 0x01;
+            const radioButton = dbg8C4_2 & 0x3F;
+            const pushType = (dbg8C4_2 >> 6) & 0x03;
+            const source9C4 = (dbg9C4_0 >> 1) & 0x01;
+
+            return '8C4 seq=' + Number(responeJson.dbg_seq_8c4 || 0) +
+                ' len=' + Number(responeJson.dbg_len_8c4 || 0) +
+                ' raw=' + toHexByte(dbg8C4_0) + ' ' + toHexByte(dbg8C4_1) + ' ' + toHexByte(dbg8C4_2) +
+                ' src=' + eventSrc +
+                ' radio=' + eventRadio +
+                ' btn=' + radioButton +
+                ' push=' + pushType +
+                ' | 9C4 seq=' + Number(responeJson.dbg_seq_9c4 || 0) +
+                ' len=' + Number(responeJson.dbg_len_9c4 || 0) +
+                ' raw=' + toHexByte(dbg9C4_0) + ' ' + toHexByte(dbg9C4_1) +
+                ' source=' + source9C4;
+        }
+
         async function setTime() {
             const input = document.querySelector('#DATETIME');
             const value = input.value; // e.g., "2025-04-29T14:30"
@@ -934,6 +964,7 @@ Continue?
                         const responeJson = await response.json();
                         const datetimeOutput = document.getElementById('rtc-time-value');
                         const fwVersionOutput = document.getElementById('firmware-version-value');
+                        const sourceDebugOutput = document.getElementById('source-debug-value');
                         if (datetimeOutput) {
                             datetimeOutput.textContent = responeJson.year + "-" +
                                 String(responeJson.month).padStart(2, '0') + "-" +
@@ -944,6 +975,9 @@ Continue?
                         }
                         if (fwVersionOutput) {
                             fwVersionOutput.textContent = responeJson.firmware_version;
+                        }
+                        if (sourceDebugOutput) {
+                            sourceDebugOutput.textContent = getSourceDebugText(responeJson);
                         }
                     }
                 }, 1000
@@ -1308,6 +1342,7 @@ Continue?
         <div>
             <p id="rtc-time">RTC time: <span id="rtc-time-value"></span></p>
             <p>Firmware version: <span id="firmware-version-value">v3.0.1</span></p>
+            <p>Source debug: <span id="source-debug-value"></span></p>
         </div>
         <div class="footer">
             <p>PSA VAN-CAN Bridge - <a href="https://github.com/morcibacsi/PSAVanCanBridge">GitHub Repository</a></p>

@@ -39,6 +39,21 @@ class MessageHandler_8C4 : public IMessageHandler<MessageHandler_8C4>
 
         void Parse(CarState* carState, const BusMessage& message)
         {
+            carState->SourceDebug.len8C4 = message.dataLength;
+            if (message.dataLength > 0)
+            {
+                carState->SourceDebug.raw8C4_0 = message.data[0];
+            }
+            if (message.dataLength > 1)
+            {
+                carState->SourceDebug.raw8C4_1 = message.data[1];
+            }
+            if (message.dataLength > 2)
+            {
+                carState->SourceDebug.raw8C4_2 = message.data[2];
+            }
+            carState->SourceDebug.seq8C4++;
+
             VanEventByte1Struct eventSource;
             eventSource.asByte = message.data[0];
 

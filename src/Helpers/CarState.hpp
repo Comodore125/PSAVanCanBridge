@@ -136,6 +136,19 @@ struct CarState
     //21F
     CarRadioRemoteStruct RadioRemote{};
 
+    struct SourceDebugState
+    {
+        uint8_t seq8C4 = 0;
+        uint8_t seq9C4 = 0;
+        uint8_t len8C4 = 0;
+        uint8_t len9C4 = 0;
+        uint8_t raw8C4_0 = 0;
+        uint8_t raw8C4_1 = 0;
+        uint8_t raw8C4_2 = 0;
+        uint8_t raw9C4_0 = 0;
+        uint8_t raw9C4_1 = 0;
+    } SourceDebug{};
+
     //15B, 260, 1DB AEE2004
     CarSettings_Struct CarSettings{};
 

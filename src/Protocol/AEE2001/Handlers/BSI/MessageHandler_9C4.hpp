@@ -42,6 +42,17 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
         {
             constexpr std::size_t ExpectedPacketSize = sizeof(VanRadioRemoteStruct);
 
+            carState->SourceDebug.len9C4 = message.dataLength;
+            if (message.dataLength > 0)
+            {
+                carState->SourceDebug.raw9C4_0 = message.data[0];
+            }
+            if (message.dataLength > 1)
+            {
+                carState->SourceDebug.raw9C4_1 = message.data[1];
+            }
+            carState->SourceDebug.seq9C4++;
+
             if (message.dataLength != ExpectedPacketSize)
             {
                 return;

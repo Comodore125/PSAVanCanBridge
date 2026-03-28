@@ -273,6 +273,15 @@ esp_err_t WebServer::get_time_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(json, "month", instance->_carState->Month);
     cJSON_AddNumberToObject(json, "year", instance->_carState->Year);
     cJSON_AddStringToObject(json, "firmware_version", instance->_carState->Version);
+    cJSON_AddNumberToObject(json, "dbg_seq_8c4", instance->_carState->SourceDebug.seq8C4);
+    cJSON_AddNumberToObject(json, "dbg_seq_9c4", instance->_carState->SourceDebug.seq9C4);
+    cJSON_AddNumberToObject(json, "dbg_len_8c4", instance->_carState->SourceDebug.len8C4);
+    cJSON_AddNumberToObject(json, "dbg_len_9c4", instance->_carState->SourceDebug.len9C4);
+    cJSON_AddNumberToObject(json, "dbg_8c4_0", instance->_carState->SourceDebug.raw8C4_0);
+    cJSON_AddNumberToObject(json, "dbg_8c4_1", instance->_carState->SourceDebug.raw8C4_1);
+    cJSON_AddNumberToObject(json, "dbg_8c4_2", instance->_carState->SourceDebug.raw8C4_2);
+    cJSON_AddNumberToObject(json, "dbg_9c4_0", instance->_carState->SourceDebug.raw9C4_0);
+    cJSON_AddNumberToObject(json, "dbg_9c4_1", instance->_carState->SourceDebug.raw9C4_1);
     const char *jsonResponse = cJSON_Print(json);
     cJSON_Delete(json);
     httpd_resp_sendstr(req, jsonResponse);
