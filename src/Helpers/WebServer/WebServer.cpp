@@ -273,15 +273,30 @@ esp_err_t WebServer::get_time_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(json, "month", instance->_carState->Month);
     cJSON_AddNumberToObject(json, "year", instance->_carState->Year);
     cJSON_AddStringToObject(json, "firmware_version", instance->_carState->Version);
-    cJSON_AddNumberToObject(json, "dbg_seq_8c4", instance->_carState->SourceDebug.seq8C4);
-    cJSON_AddNumberToObject(json, "dbg_seq_9c4", instance->_carState->SourceDebug.seq9C4);
-    cJSON_AddNumberToObject(json, "dbg_len_8c4", instance->_carState->SourceDebug.len8C4);
-    cJSON_AddNumberToObject(json, "dbg_len_9c4", instance->_carState->SourceDebug.len9C4);
-    cJSON_AddNumberToObject(json, "dbg_8c4_0", instance->_carState->SourceDebug.raw8C4_0);
-    cJSON_AddNumberToObject(json, "dbg_8c4_1", instance->_carState->SourceDebug.raw8C4_1);
-    cJSON_AddNumberToObject(json, "dbg_8c4_2", instance->_carState->SourceDebug.raw8C4_2);
-    cJSON_AddNumberToObject(json, "dbg_9c4_0", instance->_carState->SourceDebug.raw9C4_0);
-    cJSON_AddNumberToObject(json, "dbg_9c4_1", instance->_carState->SourceDebug.raw9C4_1);
+
+    cJSON *sourceDebugTraceArray = cJSON_AddArrayToObject(json, "source_debug_trace");
+    const uint8_t traceCount = instance->_carState->SourceDebugTraceSize;
+    const uint8_t nextIndex = instance->_carState->SourceDebugTraceNextIndex;
+    for (uint8_t i = 0; i < traceCount; ++i)
+    {
+        const uint8_t index = static_cast<uint8_t>((nextIndex + i) % traceCount);
+        const auto& entry = instance->_carState->SourceDebugTrace[index];
+        if (entry.seq == 0)
+        {
+            continue;
+        }
+
+        cJSON *traceEntryJson = cJSON_CreateObject();
+        cJSON_AddNumberToObject(traceEntryJson, "seq", entry.seq);
+        cJSON_AddNumberToObject(traceEntryJson, "time_ms", entry.timeMs);
+        cJSON_AddNumberToObject(traceEntryJson, "type", entry.type);
+        cJSON_AddNumberToObject(traceEntryJson, "len", entry.len);
+        cJSON_AddNumberToObject(traceEntryJson, "data0", entry.data0);
+        cJSON_AddNumberToObject(traceEntryJson, "data1", entry.data1);
+        cJSON_AddNumberToObject(traceEntryJson, "data2", entry.data2);
+        cJSON_AddItemToArray(sourceDebugTraceArray, traceEntryJson);
+    }
+
     const char *jsonResponse = cJSON_Print(json);
     cJSON_Delete(json);
     httpd_resp_sendstr(req, jsonResponse);

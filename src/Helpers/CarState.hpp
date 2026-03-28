@@ -135,19 +135,39 @@ struct CarState
 
     //21F
     CarRadioRemoteStruct RadioRemote{};
+    uint64_t RadioRemoteSourceHoldUntil = 0;
+    uint8_t RadioRemoteSourceLastVanState = 0;
+    static constexpr uint16_t RadioRemoteSourceHoldMs = 200;
 
-    struct SourceDebugState
+    struct SourceDebugTraceEntry
     {
-        uint8_t seq8C4 = 0;
-        uint8_t seq9C4 = 0;
-        uint8_t len8C4 = 0;
-        uint8_t len9C4 = 0;
-        uint8_t raw8C4_0 = 0;
-        uint8_t raw8C4_1 = 0;
-        uint8_t raw8C4_2 = 0;
-        uint8_t raw9C4_0 = 0;
-        uint8_t raw9C4_1 = 0;
-    } SourceDebug{};
+        uint16_t seq = 0;
+        uint32_t timeMs = 0;
+        uint8_t type = 0; // 1 = VAN 9C4, 2 = CAN 21F
+        uint8_t len = 0;
+        uint8_t data0 = 0;
+        uint8_t data1 = 0;
+        uint8_t data2 = 0;
+    };
+
+    static constexpr uint8_t SourceDebugTraceSize = 16;
+    SourceDebugTraceEntry SourceDebugTrace[SourceDebugTraceSize]{};
+    uint8_t SourceDebugTraceNextIndex = 0;
+    uint16_t SourceDebugTraceSeq = 0;
+
+    void AddSourceDebugTrace(uint8_t type, uint8_t len, uint8_t data0, uint8_t data1, uint8_t data2)
+    {
+        SourceDebugTraceEntry& entry = SourceDebugTrace[SourceDebugTraceNextIndex];
+        entry.seq = ++SourceDebugTraceSeq;
+        entry.timeMs = static_cast<uint32_t>(CurrenTime & 0xFFFFFFFFu);
+        entry.type = type;
+        entry.len = len;
+        entry.data0 = data0;
+        entry.data1 = data1;
+        entry.data2 = data2;
+
+        SourceDebugTraceNextIndex = static_cast<uint8_t>((SourceDebugTraceNextIndex + 1) % SourceDebugTraceSize);
+    }
 
     //15B, 260, 1DB AEE2004
     CarSettings_Struct CarSettings{};

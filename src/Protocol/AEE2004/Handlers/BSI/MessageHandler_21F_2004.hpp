@@ -37,6 +37,11 @@ class MessageHandler_21F : public IMessageHandler<MessageHandler_21F>
 
         BusMessage Generate(CarState* carState)
         {
+            const bool sourceActive = carState->CurrenTime < carState->RadioRemoteSourceHoldUntil;
+
+            carState->RadioRemote.data.source = sourceActive ? 1 : 0;
+            carState->RadioRemote.data.command_valid = sourceActive ? 1 : 0;
+
             CAN_21F_Byte1Struct field1{};
             field1.data.list                   = carState->RadioRemote.data.list;
             field1.data.mode_phone             = carState->RadioRemote.data.mode_phone;
@@ -56,6 +61,8 @@ class MessageHandler_21F : public IMessageHandler<MessageHandler_21F>
             message.data[0] = field1.asByte;
             message.data[1] = carState->RadioRemote.data.scroll_position;
             message.data[2] = field3.asByte;
+
+            carState->AddSourceDebugTrace(2, message.dataLength, message.data[0], message.data[1], message.data[2]);
 
             return message;
         }
@@ -90,11 +97,6 @@ class MessageHandler_21F : public IMessageHandler<MessageHandler_21F>
                 carState->RadioRemote.data.list_minus    = packet.Command3.data.list_minus;
                 carState->RadioRemote.data.list_plus     = packet.Command3.data.list_plus;
                 carState->RadioRemote.data.source        = packet.Command3.data.source;
-            }
-
-            if (_immediateSignalCallback != nullptr)
-            {
-                _immediateSignalCallback(ImmediateSignal::RadioRemote);
             }
         }
 };

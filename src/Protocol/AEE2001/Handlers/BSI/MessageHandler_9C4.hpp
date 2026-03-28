@@ -42,16 +42,9 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
         {
             constexpr std::size_t ExpectedPacketSize = sizeof(VanRadioRemoteStruct);
 
-            carState->SourceDebug.len9C4 = message.dataLength;
-            if (message.dataLength > 0)
-            {
-                carState->SourceDebug.raw9C4_0 = message.data[0];
-            }
-            if (message.dataLength > 1)
-            {
-                carState->SourceDebug.raw9C4_1 = message.data[1];
-            }
-            carState->SourceDebug.seq9C4++;
+            const uint8_t raw0 = message.dataLength > 0 ? message.data[0] : 0;
+            const uint8_t raw1 = message.dataLength > 1 ? message.data[1] : 0;
+            carState->AddSourceDebugTrace(1, message.dataLength, raw0, raw1, 0);
 
             if (message.dataLength != ExpectedPacketSize)
             {
@@ -63,7 +56,14 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
 
             carState->RadioRemote.data.scroll_position = packet.ScroolPosition;
 
-            carState->RadioRemote.data.source          = packet.ButtonStatus.data.source;
+            const uint8_t incomingSource = packet.ButtonStatus.data.source;
+            if (incomingSource && !carState->RadioRemoteSourceLastVanState)
+            {
+                carState->RadioRemoteSourceHoldUntil = carState->CurrenTime + carState->RadioRemoteSourceHoldMs;
+            }
+            carState->RadioRemoteSourceLastVanState = incomingSource;
+
+            carState->RadioRemote.data.source          = incomingSource;
             carState->RadioRemote.data.volume_minus    = packet.ButtonStatus.data.volume_minus;
             carState->RadioRemote.data.volume_plus     = packet.ButtonStatus.data.volume_plus;
             carState->RadioRemote.data.seek_up         = packet.ButtonStatus.data.seek_up;
