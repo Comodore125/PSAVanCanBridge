@@ -305,8 +305,9 @@ void WebServer::StartApMode()
             .password = "123456789",
             .ssid_len = static_cast<uint8_t>(strlen("PSA VAN-CAN Bridge")),
             .channel = 1,
-            .authmode = WIFI_AUTH_WPA_PSK,
+            .authmode = WIFI_AUTH_WPA2_PSK,
             .max_connection = 4,
+            .pairwise_cipher = WIFI_CIPHER_TYPE_CCMP,
         }
     };
 
