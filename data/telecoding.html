@@ -364,19 +364,17 @@ class DiagnosticClient {
     }
 
     async readZone(zoneId) {
-        const response = await this.transport.send(
-            this.protocol.readZoneTag + zoneId
-        );
+        const normalizedZoneId = String(zoneId).toUpperCase();
+        const expectedPrefix = (this.protocol.name === "UDS" ? "62" : "61") + normalizedZoneId;
+        const response = String(await this.transport.send(
+            this.protocol.readZoneTag + normalizedZoneId
+        )).replace(/\s+/g, "").toUpperCase();
 
-        if (!response.startsWith("62") && !response.startsWith("61")) {
-            throw new Error("Read failed: " + response);
+        if (!/^[0-9A-F]+$/.test(response) || response.length % 2 !== 0 ||
+            !response.startsWith(expectedPrefix)) {
+            throw new Error("Read failed for zone " + normalizedZoneId + ": " + response);
         }
-
-        if (this.protocol.name === "UDS") {
-            return response.substring(6);
-        } else if (this.protocol.name === "KWP-HAB") {
-            return response.substring(4);
-        }
+        return response.substring(expectedPrefix.length);
     }
 
     async writeZone(zoneId, hexData) {
@@ -391,11 +389,11 @@ class DiagnosticClient {
             }
         }
         else if (this.protocol.name === "KWP-HAB") {
-            if (response.length != 4 ||
-                !response.startsWith("7B") && response.substring(2, 4) !== zoneId) {
-                    throw new Error("Write failed: " + response);
+            const expectedResponse = "7B" + zoneId.toUpperCase();
+            if (response !== expectedResponse) {
+                throw new Error("Write failed for zone " + zoneId +
+                    ": expected " + expectedResponse + ", got " + response);
             }
-
         }
     }
 
@@ -406,6 +404,183 @@ class DiagnosticClient {
                 throw new Error("Secure traceability failed: " + traceabilityResponse);
             }
         }
+    }
+    // RD45/KWP-HAB full telecoding transaction support.
+    // Descriptor-driven: no RD45 payload or VIN is hard-coded here.
+    getKwpHabTelecodingTransactionConfig() {
+        if (this.protocol.name !== "KWP-HAB") {
+            return null;
+        }
+
+        const config = this.ecuDefinition.kwp_hab_telecoding_transaction;
+        if (!config || config.enabled !== true) {
+            return null;
+        }
+
+        if (!Array.isArray(config.transaction_zones) ||
+            config.transaction_zones.length === 0 ||
+            typeof config.traceability_zone !== "string") {
+            throw new Error("Invalid kwp_hab_telecoding_transaction descriptor");
+        }
+
+        const zones = config.transaction_zones.map(zone => String(zone).toUpperCase());
+        const traceabilityZone = config.traceability_zone.toUpperCase();
+        if (!/^[0-9A-F]{2}$/.test(traceabilityZone) ||
+            zones.some(zone => !/^[0-9A-F]{2}$/.test(zone)) ||
+            new Set(zones).size !== zones.length || zones.includes(traceabilityZone)) {
+            throw new Error("Invalid or duplicate KWP-HAB transaction zones");
+        }
+
+        for (const [zoneId, length] of Object.entries(config.expected_payload_lengths_bytes || {})) {
+            if (!Number.isInteger(length) || length < 0) {
+                throw new Error("Invalid expected payload length for zone " + zoneId);
+            }
+        }
+
+        return config;
+    }
+
+    normalizeZoneHex(hexData) {
+        const normalized = String(hexData || "")
+            .replace(/\s+/g, "")
+            .toUpperCase();
+
+        if (!/^[0-9A-F]*$/.test(normalized) || (normalized.length % 2) !== 0) {
+            throw new Error("Invalid hexadecimal zone payload: " + hexData);
+        }
+
+        return normalized;
+    }
+
+    validateTransactionZoneLength(zoneId, hexData, config) {
+        const normalized = this.normalizeZoneHex(hexData);
+        const expectedLengths = config.expected_payload_lengths_bytes || {};
+        const expectedLength = expectedLengths[zoneId];
+
+        if (expectedLength !== undefined && normalized.length !== expectedLength * 2) {
+            throw new Error(
+                "Unexpected payload length for zone " + zoneId +
+                ": expected " + expectedLength + " byte(s), got " +
+                (normalized.length / 2)
+            );
+        }
+
+        return normalized;
+    }
+
+    isKwpHabTransactionZone(zoneId) {
+        const config = this.getKwpHabTelecodingTransactionConfig();
+        if (!config) {
+            return false;
+        }
+
+        const wanted = zoneId.toUpperCase();
+        return config.transaction_zones
+            .map(zone => String(zone).toUpperCase())
+            .includes(wanted);
+    }
+
+    async writeKwpHabTelecodingTransaction(modifiedZoneHexById) {
+        const config = this.getKwpHabTelecodingTransactionConfig();
+        if (!config) {
+            throw new Error("KWP-HAB telecoding transaction is not enabled in this ECU descriptor");
+        }
+
+        if (Object.keys(modifiedZoneHexById || {}).length === 0) return { verified: {} };
+
+        const transactionZones = config.transaction_zones
+            .map(zone => String(zone).toUpperCase());
+        const traceabilityZone = String(config.traceability_zone).toUpperCase();
+        const payloads = {};
+
+        Logger.log("KWP-HAB telecoding: capturing current transaction payloads");
+
+        for (const zoneId of [...transactionZones, traceabilityZone]) {
+            const currentHex = await this.readZone(zoneId);
+            payloads[zoneId] = this.validateTransactionZoneLength(
+                zoneId,
+                currentHex,
+                config
+            );
+            Logger.log("Captured " + zoneId + " = " + payloads[zoneId]);
+        }
+
+        const deliberatelyModified = {};
+        for (const [rawZoneId, rawHex] of Object.entries(modifiedZoneHexById || {})) {
+            const zoneId = rawZoneId.toUpperCase();
+            if (!transactionZones.includes(zoneId)) {
+                throw new Error(
+                    "Zone " + zoneId +
+                    " is not part of the configured KWP-HAB telecoding transaction"
+                );
+            }
+
+            const modifiedHex = this.validateTransactionZoneLength(
+                zoneId,
+                rawHex,
+                config
+            );
+            payloads[zoneId] = modifiedHex;
+            deliberatelyModified[zoneId] = modifiedHex;
+        }
+
+        Logger.log(
+            "KWP-HAB telecoding: writing full transaction set " +
+            transactionZones.join(" -> ") + " -> " + traceabilityZone
+        );
+
+        for (const zoneId of transactionZones) {
+            await this.writeZone(zoneId, payloads[zoneId]);
+        }
+
+        // A0 is not generated or edited by the bridge. Re-read it immediately
+        // before finalisation so firmware-owned counters/state updated by the
+        // preceding configuration writes are not replaced with a stale value.
+        const traceabilityInitial = payloads[traceabilityZone];
+        const traceabilityBefore = this.validateTransactionZoneLength(
+            traceabilityZone,
+            await this.readZone(traceabilityZone),
+            config
+        );
+        Logger.log(
+            "A0 initial/pre-finalize: " +
+            traceabilityInitial + " -> " + traceabilityBefore
+        );
+        await this.writeZone(traceabilityZone, traceabilityBefore);
+
+        const verified = {};
+        for (const [zoneId, expectedHex] of Object.entries(deliberatelyModified)) {
+            const readback = this.validateTransactionZoneLength(
+                zoneId,
+                await this.readZone(zoneId),
+                config
+            );
+            if (readback !== expectedHex) {
+                throw new Error(
+                    "Read-back mismatch for zone " + zoneId +
+                    ": expected " + expectedHex + ", got " + readback
+                );
+            }
+            verified[zoneId] = readback;
+            Logger.log("Verified " + zoneId + " = " + readback);
+        }
+
+        const traceabilityAfter = this.validateTransactionZoneLength(
+            traceabilityZone,
+            await this.readZone(traceabilityZone),
+            config
+        );
+        Logger.log(
+            "A0 traceability before/after: " +
+            traceabilityBefore + " -> " + traceabilityAfter
+        );
+
+        return {
+            verified,
+            traceabilityInitial,
+            traceabilityBefore,
+            traceabilityAfter
+        };
     }
 }
 
@@ -841,26 +1016,36 @@ function createZoneCard(zoneId, zoneDef) {
     writeButton.innerText = "Write";
 
     writeButton.addEventListener("click", async () => {
+        let sessionStarted = false;
         try {
+            if (app.ecuDefinition.zones[zoneId].read_only === true) {
+                throw new Error("Write blocked for read-only zone " + zoneId);
+            }
             await app.diagnosticClient.selectECU();
             await app.diagnosticClient.startSession();
+            sessionStarted = true;
 
             await app.diagnosticClient.unlock();
 
-            await app.diagnosticClient.readZone(zoneId);
-            await app.diagnosticClient.writeZone(
-                zoneId,
-                app.zoneStates[zoneId].modifiedHex
-            );
+            if (app.diagnosticClient.isKwpHabTransactionZone(zoneId)) {
+                await app.diagnosticClient.writeKwpHabTelecodingTransaction(
+                    { [zoneId]: app.zoneStates[zoneId].modifiedHex }
+                );
+            } else {
+                await app.diagnosticClient.readZone(zoneId);
+                await app.diagnosticClient.writeZone(
+                    zoneId,
+                    app.zoneStates[zoneId].modifiedHex
+                );
 
-            try {
-                await app.diagnosticClient.writeSecureTraceability();
-            }
-            catch (err) {
-                Logger.log("Secure traceability failed: " + err);
+                try {
+                    await app.diagnosticClient.writeSecureTraceability();
+                }
+                catch (err) {
+                    Logger.log("Secure traceability failed: " + err);
+                }
             }
 
-            await app.diagnosticClient.stopSession();
 
             app.zoneStates[zoneId].originalBytes =
                 new Uint8Array(app.zoneStates[zoneId].modifiedBytes);
@@ -871,6 +1056,12 @@ function createZoneCard(zoneId, zoneDef) {
             Logger.log("Failed writing zone " + zoneId + ": " + err);
             console.error(err);
             //alert(err);
+        }
+        finally {
+            if (sessionStarted) {
+                try { await app.diagnosticClient.stopSession(); }
+                catch (err) { Logger.log("Failed closing diagnostic session: " + err); }
+            }
         }
     });
 
@@ -1014,18 +1205,43 @@ async function writeModifiedZones() {
     await app.diagnosticClient.selectECU();
     await app.diagnosticClient.startSession();
 
+    try {
     await app.diagnosticClient.unlock();
 
-    let anyModified = false;
+    const transactionConfig = app.diagnosticClient.getKwpHabTelecodingTransactionConfig();
+    const transactionZoneIds = transactionConfig
+        ? transactionConfig.transaction_zones.map(zone => String(zone).toUpperCase())
+        : [];
+
+    const transactionModified = {};
+    const regularModified = [];
+
     for (const zoneId in app.zoneStates) {
         const zoneState = app.zoneStates[zoneId];
+        const zoneDef = app.ecuDefinition.zones[zoneId];
+
+        if (zoneDef && zoneDef.read_only === true) {
+            Logger.log("Read-only zone skipped from bulk write: " + zoneId);
+            continue;
+        }
 
         if (!zoneState.dirty) {
             continue;
         }
 
-        try {
+        if (transactionConfig && transactionZoneIds.includes(zoneId.toUpperCase())) {
+            transactionModified[zoneId.toUpperCase()] = zoneState.modifiedHex;
+        } else {
+            regularModified.push(zoneId);
+        }
+    }
 
+    let anyRegularModified = false;
+
+    for (const zoneId of regularModified) {
+        const zoneState = app.zoneStates[zoneId];
+
+        try {
             await app.diagnosticClient.readZone(zoneId);
             await app.diagnosticClient.writeZone(
                 zoneId,
@@ -1034,16 +1250,34 @@ async function writeModifiedZones() {
 
             zoneState.originalBytes =
                 new Uint8Array(zoneState.modifiedBytes);
-
             updateZoneCard(zoneId);
-            anyModified = true;
+            anyRegularModified = true;
         }
         catch (err) {
             Logger.log("Failed writing zone " + zoneId + ": " + err);
         }
     }
 
-    if (anyModified) {
+    const transactionModifiedIds = Object.keys(transactionModified);
+    if (transactionModifiedIds.length > 0) {
+        await app.diagnosticClient.writeKwpHabTelecodingTransaction(
+            transactionModified
+        );
+
+        for (const zoneId of transactionModifiedIds) {
+            const zoneState = app.zoneStates[zoneId];
+            if (zoneState) {
+                zoneState.originalBytes =
+                    new Uint8Array(zoneState.modifiedBytes);
+                updateZoneCard(zoneId);
+            }
+        }
+    }
+
+    // Preserve the existing UDS traceability behaviour for non-transaction
+    // writes. KWP-HAB A0 finalisation is performed only by the descriptor-
+    // driven full transaction helper above.
+    if (anyRegularModified && app.diagnosticClient.protocol.name === "UDS") {
         try {
             await app.diagnosticClient.writeSecureTraceability();
         }
@@ -1052,7 +1286,10 @@ async function writeModifiedZones() {
         }
     }
 
-    await app.diagnosticClient.stopSession();
+    }
+    finally {
+        await app.diagnosticClient.stopSession();
+    }
 }
 
 async function loadECU(json) {
