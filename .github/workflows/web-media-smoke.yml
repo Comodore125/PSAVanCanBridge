@@ -25,3 +25,17 @@ jobs:
       - name: Verify embedded HTML header compiles in C++17
         run: |
           printf '#include "src/Helpers/WebServer/MediaPage.hpp"\nint main(){return media_page_html[0] == 0;}\n' | g++ -std=c++17 -I. -x c++ -fsyntax-only -
+
+  firmware-c6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep PlatformIO packages outside checkout
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Build matching ESP32-C6 firmware
+        run: pio run --environment esp32c6_v16
