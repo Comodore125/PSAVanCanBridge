@@ -61,7 +61,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <button id="disconnect" class="danger">Forget Spotify tokens</button>
 <span class="status" id="authState">Not authorized</span>
 </div>
-<label for="callbackValue">2 · Paste full callback URL, or just the authorization code</label>
+<label for="callbackValue">2 · Paste the FULL callback URL (OAuth state must match)</label>
 <input id="callbackValue" autocomplete="off" spellcheck="false" placeholder="https://…?code=…&state=…">
 <button id="exchange">3 · Complete authorization</button>
 <p class="muted">Tokens stay in this browser's session storage only. Navigation to a different browser or a Private tab loses the session. Spotify access needs Internet even while connected to the bridge's Wi-Fi.</p>
@@ -197,8 +197,6 @@ async function finishAuth() {
     code=q.get("code")||"";state=q.get("state")||"";
     if(state!==saved.state) throw Error("OAuth state mismatch");
   } else {
-    // For manual code-only copy, demand state separately where supplied by helper.
-    if(!/^[a-zA-Z0-9_-]+$/.test(raw)) throw Error("Paste the full callback URL so OAuth state can be verified");
     throw Error("Paste the FULL callback URL, not just a code, to validate OAuth state");
   }
   if(!code) throw Error("No authorization code in callback URL");
@@ -340,7 +338,8 @@ bind("transfer",async()=>{const id=$("devices").value;if(!id)throw Error("Select
 load();
 if(base64url(sha256Ascii("abc"))!=="ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")log("WARNING: SHA-256 self-test FAILED; do not authorize");
 else log("SHA-256 self-test passed; listening for bridge input.");
-setInterval(pollBridge,180);pollBridge();
+document.addEventListener("visibilitychange",()=>{previous=null;if(!document.hidden){pollBridge();if(tokens)refreshPlayer();}});
+setInterval(()=>{if(!document.hidden)pollBridge();},400);pollBridge();
 setInterval(()=>{if(tokens&&!document.hidden)refreshPlayer();},6500);
 if(tokens)refreshPlayer();
 </script>
