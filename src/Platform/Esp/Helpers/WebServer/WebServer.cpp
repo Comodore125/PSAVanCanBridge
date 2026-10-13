@@ -1,4 +1,5 @@
 #include "Helpers/WebServer/WebServer.hpp"
+#include "Helpers/WebServer/MediaPage.hpp"
 #include "esp_ota_ops.h"
 #include "esp_image_format.h"
 #include "mdns.h"
@@ -32,6 +33,8 @@ namespace
         { "/dashboard.html", HTTP_GET, &WebServer::get_html_page_handler, false },
         { "/styles.css", HTTP_GET, &WebServer::get_html_page_handler, false },
         { "/api/time", HTTP_GET, &WebServer::get_time_handler, false },
+        { "/media", HTTP_GET, &WebServer::get_media_page_handler, false },
+        { "/api/media", HTTP_GET, &WebServer::get_media_status_handler, false },
         { "/api/reboot", HTTP_GET, &WebServer::get_reboot_handler, false },
         { "/api/getVin", HTTP_GET, &WebServer::get_vin_handler, false },
         { "/api/config.json", HTTP_GET, &WebServer::get_config_handler, false },
@@ -553,6 +556,37 @@ esp_err_t WebServer::get_html_page_handler(httpd_req_t *req)
 
     httpd_resp_send(req, (const char*)page_data, data_size);
     return ESP_OK;
+}
+
+esp_err_t WebServer::get_media_page_handler(httpd_req_t *req)
+{
+    auto* instance = static_cast<WebServer*>(req->user_ctx);
+    instance->_lastRequestTime = instance->_carState->CurrenTime;
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_sendstr(req, media_page_html);
+}
+
+esp_err_t WebServer::get_media_status_handler(httpd_req_t *req)
+{
+    auto* instance = static_cast<WebServer*>(req->user_ctx);
+    instance->_lastRequestTime = instance->_carState->CurrenTime;
+    auto* state = instance->_carState;
+    cJSON* json = cJSON_CreateObject();
+    if (!json) return httpd_resp_send_500(req);
+    cJSON_AddNumberToObject(json, "next_count", __atomic_load_n(&state->MediaNextCount, __ATOMIC_RELAXED));
+    cJSON_AddNumberToObject(json, "previous_count", __atomic_load_n(&state->MediaPreviousCount, __ATOMIC_RELAXED));
+    cJSON_AddBoolToObject(json, "seek_up", state->RadioRemote.data.seek_up != 0);
+    cJSON_AddBoolToObject(json, "seek_down", state->RadioRemote.data.seek_down != 0);
+    cJSON_AddNumberToObject(json, "uptime_ms", static_cast<double>(state->CurrenTime));
+    const char* response = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (!response) return httpd_resp_send_500(req);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const esp_err_t result = httpd_resp_sendstr(req, response);
+    cJSON_free((void*)response);
+    return result;
 }
 
 esp_err_t WebServer::get_time_handler(httpd_req_t *req)
