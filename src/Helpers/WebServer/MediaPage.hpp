@@ -40,7 +40,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <div><label>Physical seek bits</label><span id="seekBits">—</span></div>
 </div>
 <div class="row" style="margin-top:14px">
-<label><input type="checkbox" id="active" checked> Enable stalk-to-Spotify forwarding</label>
+<label><input type="checkbox" id="active"> Enable stalk-to-Spotify forwarding</label>
 <label><input type="checkbox" id="invert"> Swap seek directions</label>
 </div>
 <p class="muted">Counters count rising edges in VAN 0x9C4; initial readings do not trigger songs. Hold, release, and press again for a new event.</p>
