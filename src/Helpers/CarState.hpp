@@ -137,6 +137,9 @@ struct CarState
 
     //21F
     CarRadioRemoteStruct RadioRemote{};
+    // Edge counters for web media control; updated/read with GCC atomic builtins.
+    uint32_t MediaNextCount = 0;
+    uint32_t MediaPreviousCount = 0;
 
     //15B, 260, 1DB AEE2004
     CarSettings_Struct CarSettings{};

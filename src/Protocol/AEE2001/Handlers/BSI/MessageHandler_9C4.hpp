@@ -14,6 +14,8 @@
 class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
 {
     ImmediateSignalCallback _immediateSignalCallback = nullptr;
+    bool _lastSeekUp = false;
+    bool _lastSeekDown = false;
 
     public:
         static constexpr uint32_t MessageId = 0x9C4;
@@ -60,6 +62,16 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
 
             carState->RadioRemote.data.owerflow_scan_positive = packet.ButtonStatus.data.counter_overflow_positive;
             carState->RadioRemote.data.owerflow_scan_negative = packet.ButtonStatus.data.counter_overflow_negative;
+
+            // Record only rising edges; repeated VAN frames must not skip multiple tracks.
+            const bool seekUp = packet.ButtonStatus.data.seek_up != 0;
+            const bool seekDown = packet.ButtonStatus.data.seek_down != 0;
+            if (seekUp && !_lastSeekUp)
+                __atomic_fetch_add(&carState->MediaNextCount, 1U, __ATOMIC_RELAXED);
+            if (seekDown && !_lastSeekDown)
+                __atomic_fetch_add(&carState->MediaPreviousCount, 1U, __ATOMIC_RELAXED);
+            _lastSeekUp = seekUp;
+            _lastSeekDown = seekDown;
 
             if (_immediateSignalCallback != nullptr)
             {
