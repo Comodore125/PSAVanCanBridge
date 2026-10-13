@@ -154,6 +154,9 @@ struct CarState
 
     //21F
     CarRadioRemoteStruct RadioRemote{};
+    // Read-only media event counters; touched only at VAN input rising edges.
+    uint32_t MediaNextCount = 0;
+    uint32_t MediaPreviousCount = 0;
     RadioRemoteVolumeControl RadioRemoteVolumeControlState{};
 
     //0A2
