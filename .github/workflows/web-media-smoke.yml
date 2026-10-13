@@ -1,0 +1,25 @@
+name: Web media smoke checks
+on:
+  pull_request:
+    paths:
+      - "src/Helpers/WebServer/MediaPage.hpp"
+      - "src/Helpers/WebServer/WebServer.hpp"
+      - "src/Protocol/AEE2001/Handlers/BSI/MessageHandler_9C4.hpp"
+      - "src/Helpers/CarState.hpp"
+      - "tests/web-media-smoke.cjs"
+      - ".github/workflows/web-media-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  browser-and-header:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Offline media page smoke checks
+        run: node tests/web-media-smoke.cjs
+      - name: Verify embedded HTML header compiles in C++17
+        run: |
+          printf '#include "src/Helpers/WebServer/MediaPage.hpp"\nint main(){return media_page_html[0] == 0;}\n' | g++ -std=c++17 -I. -x c++ -fsyntax-only -
