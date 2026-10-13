@@ -1,0 +1,348 @@
+#pragma once
+
+// Self-contained, read-only bridge media page. Spotify requests run in the visitor's
+// browser, not in the ESP32. No token, OAuth secret or metadata is sent to the bridge.
+inline constexpr char media_page_html[] = R"PSA_MEDIA_HTML(<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PSA Bridge · Media</title>
+<style>
+:root{color-scheme:dark;font:16px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#10161e;color:#e6edf5}
+*{box-sizing:border-box}body{margin:0 auto;padding:18px;max-width:860px}
+h1{font-size:1.4rem;margin:4px 0 12px}h2{font-size:1.05rem;margin:0 0 12px}
+.card{background:#1a2532;border:1px solid #304052;border-radius:14px;margin:12px 0;padding:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+label{display:block;font-size:.88rem;color:#adc2d7;margin:8px 0 5px}
+input,select,button{font:inherit}input:not([type=checkbox]):not([type=range]),select{width:100%;background:#0f1b26;color:inherit;border:1px solid #536677;border-radius:8px;padding:10px}
+input[type=range]{width:100%;accent-color:#61c9a0}
+button{padding:10px 13px;border:0;border-radius:8px;background:#35698c;color:white;margin:3px;cursor:pointer}
+button:disabled{opacity:.35;cursor:default}.danger{background:#83505a}.good{background:#287a68}
+.muted{color:#a5b4c6;font-size:.9rem}.status{display:inline-block;border-radius:18px;padding:5px 9px;background:#374a60}
+#log{max-height:180px;overflow:auto;white-space:pre-wrap;font:12px ui-monospace,monospace;background:#101823;padding:10px;border-radius:8px}
+#art{width:98px;height:98px;object-fit:cover;border-radius:8px;display:none}
+.now{display:flex;gap:16px;align-items:center}#title{font-size:1.1rem;font-weight:700}
+.row{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+#currentPosition{font-variant-numeric:tabular-nums}
+summary{cursor:pointer}a{color:#91dbff}
+</style>
+</head>
+<body>
+<h1>PSA VAN-CAN Bridge · Media</h1>
+<p class="muted">Web-only proof of concept. VAN → bridge counters → Safari → Spotify Web API. Your RD45 AUX audio path is unchanged.</p>
+<section class="card">
+<h2>Steering-stalk input</h2>
+<div class="grid">
+<div><label>Bridge connection</label><span class="status" id="bridgeState">Connecting…</span></div>
+<div><label>Next / previous events</label><strong id="counts">0 / 0</strong></div>
+<div><label>Last button</label><strong id="lastEvent">None</strong></div>
+<div><label>Physical seek bits</label><span id="seekBits">—</span></div>
+</div>
+<div class="row" style="margin-top:14px">
+<label><input type="checkbox" id="active" checked> Enable stalk-to-Spotify forwarding</label>
+<label><input type="checkbox" id="invert"> Swap seek directions</label>
+</div>
+<p class="muted">Counters count rising edges in VAN 0x9C4; initial readings do not trigger songs. Hold, release, and press again for a new event.</p>
+<div class="row">
+<button id="testNext">Test Next event</button><button id="testPrevious">Test Previous event</button>
+<button id="clearLog">Clear log</button>
+</div>
+</section>
+<section class="card">
+<h2>Spotify authorization</h2>
+<p class="muted">Requires Spotify Premium and a Spotify developer app. Register the exact HTTPS redirect URI in your app, host the included spotify-callback.html there, then copy the callback URL back into the field below. Never enter a client secret here.</p>
+<div class="grid">
+<div><label for="clientId">Spotify Client ID (public)</label><input id="clientId" autocomplete="off" spellcheck="false" placeholder="Spotify app Client ID"></div>
+<div><label for="redirectUri">Registered HTTPS redirect URI</label><input id="redirectUri" autocomplete="off" spellcheck="false" placeholder="https://your-domain/spotify-callback.html"></div>
+</div>
+<div class="row">
+<button id="authorize" class="good">1 · Authorize at Spotify</button>
+<button id="disconnect" class="danger">Forget Spotify tokens</button>
+<span class="status" id="authState">Not authorized</span>
+</div>
+<label for="callbackValue">2 · Paste full callback URL, or just the authorization code</label>
+<input id="callbackValue" autocomplete="off" spellcheck="false" placeholder="https://…?code=…&state=…">
+<button id="exchange">3 · Complete authorization</button>
+<p class="muted">Tokens stay in this browser's session storage only. Navigation to a different browser or a Private tab loses the session. Spotify access needs Internet even while connected to the bridge's Wi-Fi.</p>
+</section>
+<section class="card">
+<h2>Now playing</h2>
+<div class="now"><img id="art" alt="Album art"><div>
+<div id="title">No playback data</div><div id="artist" class="muted"></div><div id="album" class="muted"></div>
+<div class="muted" id="currentPosition"></div>
+</div></div>
+<div class="row" style="margin-top:12px">
+<button id="prev">⏮ Previous</button><button id="pause">⏯ Play / pause</button><button id="next">Next ⏭</button><button id="refresh">Refresh</button>
+</div>
+<div class="grid">
+<div><label>Track progress (seek on release)</label><input type="range" id="position" min="0" max="1000" value="0" disabled></div>
+<div><label>Playback volume (commit on release)</label><input type="range" id="volume" min="0" max="100" value="50" disabled></div>
+</div>
+<div class="row"><button id="shuffle">Shuffle: —</button><button id="repeat">Repeat: —</button></div>
+<label for="devices">Spotify Connect output</label>
+<div class="row"><select id="devices" style="flex:1;min-width:180px"><option value="">Devices not loaded</option></select><button id="loadDevices">Find devices</button><button id="transfer">Transfer playback</button></div>
+<p id="spotifyState" class="muted">Not connected.</p>
+</section>
+<details class="card">
+<summary>Diagnostics, test status and limitations</summary>
+<p class="muted">Safari background execution is not guaranteed; when the screen locks, browser-based stalk forwarding can stop. Spotify can return 403, 404, 429 or 204. A SoftAP-only bridge does not supply Internet. This page never injects CAN data or emulates a CD changer; EMF-C display experiments require separately verified CAN captures.</p>
+<div id="log" role="log" aria-live="polite"></div>
+</details>
+<p class="muted"><a href="/">Bridge configuration</a> · Media additions do not change existing VAN/CAN messages or RD45/AUX operation.</p>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const API = location.origin + "/api/media";
+const SCOPES = "user-read-currently-playing user-read-playback-state user-modify-playback-state";
+const tokenKey = "psa-spotify-tokens-v1";
+const oauthKey = "psa-spotify-pkce-v1";
+let tokens = null, previous = null, player = null, duration = 0;
+let bridgeBusy = false, spotifyBusy = false, commandBusy = false;
+let bridgeErrors = 0, lastTrackFetch = 0, lastDeviceFetch = 0, queuedCommands = [];
+let logEntries = [], lastCountdown = 0, lastVolume = 0, lastPosition = 0;
+function log(message) {
+  const line = new Date().toLocaleTimeString() + "  " + message;
+  logEntries.unshift(line); if (logEntries.length > 90) logEntries.pop();
+  $("log").textContent = logEntries.join("\n");
+}
+function message(error) { $("spotifyState").textContent = String(error); log(String(error)); }
+function persist() { if (tokens) sessionStorage.setItem(tokenKey, JSON.stringify(tokens)); else sessionStorage.removeItem(tokenKey); }
+function load() {
+  try { tokens = JSON.parse(sessionStorage.getItem(tokenKey) || "null"); } catch (_) { tokens=null; }
+  $("clientId").value = localStorage.getItem("psa-spotify-client-id") || "";
+  $("redirectUri").value = localStorage.getItem("psa-spotify-redirect") || "";
+  $("invert").checked = localStorage.getItem("psa-spotify-invert") === "1";
+  authStatus();
+}
+function authStatus() { $("authState").textContent = tokens?.refresh_token ? "Authorized (refreshable)" : tokens?.access_token ? "Authorized" : "Not authorized"; }
+function base64url(bytes) { let out=""; bytes.forEach(x=>out+=String.fromCharCode(x)); return btoa(out).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function randomVerifier(size) {
+  const bytes = new Uint8Array(size); crypto.getRandomValues(bytes);
+  return base64url(bytes);
+}
+// Compact SHA-256 implementation for the HTTP LAN origin, where SubtleCrypto is
+// normally unavailable. PKCE verifier is ASCII. No third-party code or network.
+function sha256Ascii(text) {
+  const k = [
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+  const h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  const data=Array.from(text, x=>x.charCodeAt(0));
+  if (data.some(x=>x>127)) throw Error("PKCE verifier must be ASCII");
+  const bitLength=data.length*8;
+  data.push(128); while(data.length%64!==56) data.push(0);
+  for(let i=7;i>=0;i--) data.push(i<4 ? (bitLength >>> (i*8)) & 255 : 0);
+  const rotr=(x,n)=>(x>>>n)|(x<<(32-n));
+  for(let offset=0;offset<data.length;offset+=64) {
+    const w=new Array(64);
+    for(let i=0;i<16;i++) w[i]=((data[offset+i*4]<<24)|(data[offset+i*4+1]<<16)|(data[offset+i*4+2]<<8)|data[offset+i*4+3])>>>0;
+    for(let i=16;i<64;i++) {
+      const a=w[i-15],b=w[i-2];
+      const s0=rotr(a,7)^rotr(a,18)^(a>>>3),s1=rotr(b,17)^rotr(b,19)^(b>>>10);
+      w[i]=(w[i-16]+s0+w[i-7]+s1)>>>0;
+    }
+    let [a,b,c,d,e,f,g,hh]=h;
+    for(let i=0;i<64;i++) {
+      const s1=rotr(e,6)^rotr(e,11)^rotr(e,25);
+      const t1=(hh+s1+((e&f)^(~e&g))+k[i]+w[i])>>>0;
+      const s0=rotr(a,2)^rotr(a,13)^rotr(a,22);
+      const t2=(s0+((a&b)^(a&c)^(b&c)))>>>0;
+      hh=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;
+    }
+    [a,b,c,d,e,f,g,hh].forEach((v,i)=>{h[i]=(h[i]+v)>>>0;});
+  }
+  return h.flatMap(word=>[(word>>>24)&255,(word>>>16)&255,(word>>>8)&255,word&255]);
+}
+async function beginAuth() {
+  const clientId=$("clientId").value.trim(), redirectUri=$("redirectUri").value.trim();
+  if(!/^[0-9a-f]{32}$/i.test(clientId)) throw Error("Enter your 32-character Spotify Client ID");
+  if(!/^https:\/\/[^ ]+/i.test(redirectUri)) throw Error("Use an HTTPS callback registered in your Spotify app");
+  localStorage.setItem("psa-spotify-client-id",clientId);
+  localStorage.setItem("psa-spotify-redirect",redirectUri);
+  const verifier=randomVerifier(64), state=randomVerifier(16);
+  const challenge=base64url(sha256Ascii(verifier));
+  sessionStorage.setItem(oauthKey,JSON.stringify({verifier,state,clientId,redirectUri,created:Date.now()}));
+  const query=new URLSearchParams({response_type:"code",client_id:clientId,scope:SCOPES,redirect_uri:redirectUri,state,code_challenge_method:"S256",code_challenge:challenge,show_dialog:"true"});
+  log("Opening Spotify consent. Return here and paste the callback URL.");
+  location.href="https://accounts.spotify.com/authorize?"+query;
+}
+async function tokenExchange(form) {
+  const response=await fetch("https://accounts.spotify.com/api/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams(form),cache:"no-store"});
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok) throw Error("Spotify token HTTP "+response.status+": "+(body.error_description||body.error||"Unknown error"));
+  return body;
+}
+function acceptTokens(body,oldRefresh) {
+  tokens={access_token:body.access_token,refresh_token:body.refresh_token||oldRefresh||null,expires_at:Date.now()+Math.max(0,(body.expires_in||3600)-90)*1000};
+  persist();authStatus(); log("Spotify token obtained (token values not logged)");
+}
+async function finishAuth() {
+  const raw=$("callbackValue").value.trim();
+  const saved=JSON.parse(sessionStorage.getItem(oauthKey)||"null");
+  if(!saved || Date.now()-saved.created>600000) throw Error("Start Spotify authorization again (PKCE session expired after 10 minutes)");
+  let code=raw, state="";
+  if(raw.includes("?")) {
+    const url=new URL(raw);
+    if(url.origin+url.pathname!==new URL(saved.redirectUri).origin+new URL(saved.redirectUri).pathname) throw Error("Callback URL does not match registered redirect");
+    const q=url.searchParams;
+    if(q.has("error")) throw Error("Spotify denied authorization: "+q.get("error"));
+    code=q.get("code")||"";state=q.get("state")||"";
+    if(state!==saved.state) throw Error("OAuth state mismatch");
+  } else {
+    // For manual code-only copy, demand state separately where supplied by helper.
+    if(!/^[a-zA-Z0-9_-]+$/.test(raw)) throw Error("Paste the full callback URL so OAuth state can be verified");
+    throw Error("Paste the FULL callback URL, not just a code, to validate OAuth state");
+  }
+  if(!code) throw Error("No authorization code in callback URL");
+  const body=await tokenExchange({client_id:saved.clientId,grant_type:"authorization_code",code,redirect_uri:saved.redirectUri,code_verifier:saved.verifier});
+  acceptTokens(body,null);sessionStorage.removeItem(oauthKey);$("callbackValue").value="";
+  await refreshPlayer();
+}
+let tokenRefreshing=null;
+async function ensureToken() {
+  if(!tokens) throw Error("Authorize Spotify first");
+  if(tokens.access_token && tokens.expires_at>Date.now()) return tokens.access_token;
+  if(!tokens.refresh_token) throw Error("Spotify token expired; reauthorize");
+  if(!tokenRefreshing) tokenRefreshing=tokenExchange({grant_type:"refresh_token",refresh_token:tokens.refresh_token,client_id:$("clientId").value.trim()})
+    .then(body=>{acceptTokens(body,tokens.refresh_token);return tokens.access_token;})
+    .catch(e=>{if(String(e).includes("invalid_grant")){tokens=null;persist();authStatus();}throw e;})
+    .finally(()=>{tokenRefreshing=null;});
+  return tokenRefreshing;
+}
+async function spotify(path, method="GET", obj) {
+  const access=await ensureToken();
+  const headers={Authorization:"Bearer "+access};
+  if(obj!==undefined) headers["Content-Type"]="application/json";
+  const res=await fetch("https://api.spotify.com/v1"+path,{method,headers,body:obj===undefined?undefined:JSON.stringify(obj),cache:"no-store"});
+  if(res.status===204) return null;
+  if(!res.ok) {
+    let detail="";try{const b=await res.json();detail=b.error?.message||b.error||"";}catch(_){}
+    const retry=res.headers.get("Retry-After");
+    if(res.status===429&&retry) lastCountdown=Date.now()+Math.max(1,Number(retry))*1000;
+    throw Error("Spotify "+res.status+": "+detail+(retry?" (retry after "+retry+"s)":""));
+  }
+  return res.json();
+}
+function fmt(ms){const seconds=Math.floor((ms||0)/1000);return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0");}
+function renderPlayer(x) {
+  player=x;duration=x?.item?.duration_ms||0;
+  const item=x?.item;
+  $("title").textContent=item?.name||"No active track";
+  $("artist").textContent=(item?.artists||[]).map(a=>a.name).join(", ");
+  $("album").textContent=item?.album?.name||"";
+  const art=item?.album?.images?.[0]?.url;
+  if(art&&art.startsWith("https://")){$("art").src=art;$("art").style.display="block";}else{$("art").removeAttribute("src");$("art").style.display="none";}
+  $("currentPosition").textContent=x ? fmt(x.progress_ms)+" / "+fmt(duration)+" · "+(x.is_playing?"Playing":"Paused"):"Spotify has no active device";
+  if(!$("position").matches(":active")) $("position").value=duration?Math.round(1000*(x?.progress_ms||0)/duration):0;
+  $("position").disabled=!duration;
+  if(!$("volume").matches(":active")) $("volume").value=x?.device?.volume_percent??50;
+  $("volume").disabled=!x?.device;
+  $("shuffle").textContent="Shuffle: "+(x?.shuffle_state?"On":"Off");
+  $("repeat").textContent="Repeat: "+(x?.repeat_state||"Off");
+  $("spotifyState").textContent=x?.device ? "Active output: "+x.device.name+" ("+x.device.type+")" : "No Spotify playback device is active";
+}
+async function refreshPlayer() {
+  if(!tokens||spotifyBusy||Date.now()<lastCountdown)return;
+  spotifyBusy=true;
+  try {renderPlayer(await spotify("/me/player"));lastTrackFetch=Date.now();}
+  catch(e){message(e);}
+  finally{spotifyBusy=false;}
+}
+async function control(command) {
+  if(!tokens){log("Ignored "+command+": Spotify not authorized");return;}
+  if(Date.now()<lastCountdown){log("Spotify throttled; skipped "+command);return;}
+  queuedCommands.push(command);
+  if(commandBusy)return;
+  commandBusy=true;
+  try {
+    while(queuedCommands.length) {
+      const action=queuedCommands.shift();
+      try {
+        const path=action==="next"?"/me/player/next":"/me/player/previous";
+        await spotify(path,"POST");
+        log("Spotify "+action+" sent");
+        await new Promise(resolve=>setTimeout(resolve,230));
+      } catch(e){message(e);queuedCommands.length=0;}
+    }
+    await refreshPlayer();
+  }finally{commandBusy=false;}
+}
+async function apiAction(path,method,obj) {
+  try {await spotify(path,method,obj); await new Promise(r=>setTimeout(r,250));await refreshPlayer();}
+  catch(e){message(e);}
+}
+function stalk(action) {
+  $("lastEvent").textContent=action==="next"?"Next ⏭":"Previous ⏮";
+  log("Stalk event: "+action);
+  if($("active").checked) control(action);
+}
+async function pollBridge() {
+  if(bridgeBusy)return;
+  bridgeBusy=true;
+  const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),1200);
+  try {
+    const r=await fetch(API,{signal:abort.signal,cache:"no-store"});
+    if(!r.ok) throw Error("HTTP "+r.status);
+    const data=await r.json();
+    if(!Number.isSafeInteger(data.next_count)||!Number.isSafeInteger(data.previous_count)) throw Error("Malformed counters");
+    $("bridgeState").textContent="Connected";
+    $("counts").textContent=data.next_count+" / "+data.previous_count;
+    $("seekBits").textContent="Up: "+Boolean(data.seek_up)+", Down: "+Boolean(data.seek_down);
+    if(previous) {
+      // Ignore resets and abnormally large gaps; never replay a backlog after reconnection.
+      const elapsed=Date.now()-previous.time;
+      const dn=data.next_count-previous.next,dp=data.previous_count-previous.prev;
+      if(elapsed<2500&&dn>=0&&dp>=0&&dn+dp<=6) {
+        const invert=$("invert").checked;
+        for(let i=0;i<Math.min(dn,3);i++) stalk(invert?"previous":"next");
+        for(let i=0;i<Math.min(dp,3);i++) stalk(invert?"next":"previous");
+      }else if(dn||dp){log("Resynchronized counters; skipped "+(dn+dp)+" old events");}
+    }
+    previous={next:data.next_count,prev:data.previous_count,time:Date.now()};
+    bridgeErrors=0;
+  }catch(e) {
+    bridgeErrors++;
+    if(bridgeErrors===1)log("Bridge polling interrupted: "+e);
+    $("bridgeState").textContent="Disconnected";
+    previous=null;
+  }finally{clearTimeout(timeout);bridgeBusy=false;}
+}
+function bind(id,fn){$(id).addEventListener("click",()=>Promise.resolve().then(fn).catch(message));}
+bind("authorize",beginAuth);
+bind("exchange",finishAuth);
+bind("disconnect",()=>{tokens=null;sessionStorage.removeItem(oauthKey);persist();authStatus();renderPlayer(null);log("Spotify tokens cleared");});
+bind("next",()=>control("next"));
+bind("prev",()=>control("previous"));
+bind("testNext",()=>stalk("next"));
+bind("testPrevious",()=>stalk("previous"));
+bind("refresh",refreshPlayer);
+bind("clearLog",()=>{logEntries=[];$("log").textContent="";});
+bind("pause",async()=>{if(!player)throw Error("Refresh an active playback device first");await apiAction(player.is_playing?"/me/player/pause":"/me/player/play","PUT");});
+bind("shuffle",()=>apiAction("/me/player/shuffle?state="+(!player?.shuffle_state),"PUT"));
+bind("repeat",()=>{const states=["off","context","track"];return apiAction("/me/player/repeat?state="+states[(states.indexOf(player?.repeat_state)+1)%3],"PUT");});
+$("invert").addEventListener("change",()=>localStorage.setItem("psa-spotify-invert",$("invert").checked?"1":"0"));
+$("position").addEventListener("change",()=>{if(duration)apiAction("/me/player/seek?position_ms="+Math.round(duration*Number($("position").value)/1000),"PUT");});
+$("volume").addEventListener("change",()=>apiAction("/me/player/volume?volume_percent="+Math.round(Number($("volume").value)),"PUT"));
+bind("loadDevices",async()=>{
+  const data=await spotify("/me/player/devices");const select=$("devices");select.replaceChildren();
+  for(const d of data.devices||[]){const o=document.createElement("option");o.value=d.id||"";o.textContent=d.name+" ("+d.type+")"+(d.is_active?" · active":"");select.appendChild(o);}
+  lastDeviceFetch=Date.now();log("Devices loaded: "+(data.devices||[]).length);
+});
+bind("transfer",async()=>{const id=$("devices").value;if(!id)throw Error("Select a Spotify Connect device");await apiAction("/me/player","PUT",{device_ids:[id],play:true});});
+load();
+if(base64url(sha256Ascii("abc"))!=="ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")log("WARNING: SHA-256 self-test FAILED; do not authorize");
+else log("SHA-256 self-test passed; listening for bridge input.");
+setInterval(pollBridge,180);pollBridge();
+setInterval(()=>{if(tokens&&!document.hidden)refreshPlayer();},6500);
+if(tokens)refreshPlayer();
+</script>
+</body>
+</html>)PSA_MEDIA_HTML";
