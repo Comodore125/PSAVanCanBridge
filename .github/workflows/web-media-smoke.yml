@@ -1,0 +1,48 @@
+name: Web media smoke checks
+on:
+  push:
+    branches: [feature/3.9.2-wifi-steering-media]
+  pull_request:
+    paths:
+      - "src/Helpers/WebServer/MediaPage.hpp"
+      - "src/Helpers/WebServer/WebServer.hpp"
+      - "src/Protocol/AEE2001/Handlers/BSI/MessageHandler_9C4.hpp"
+      - "src/Helpers/CarState.hpp"
+      - "tests/web-media-smoke.cjs"
+      - ".github/workflows/web-media-smoke.yml"
+  workflow_dispatch:
+
+jobs:
+  browser-and-header:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Offline media page smoke checks
+        run: node tests/web-media-smoke.cjs
+      - name: Verify embedded HTML header compiles in C++17
+        run: |
+          printf '#include "src/Helpers/WebServer/MediaPage.hpp"\nint main(){return media_page_html[0] == 0;}\n' | g++ -std=c++17 -I. -x c++ -fsyntax-only -
+
+  firmware-c6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Keep PlatformIO packages outside checkout
+        run: echo "PLATFORMIO_CORE_DIR=$RUNNER_TEMP/platformio" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Build matching ESP32-C6 firmware
+        run: pio run --environment esp32c6_v16
+      - name: Upload experimental firmware for bench validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: experimental-392-media-esp32c6-v16
+          path: .pio/build/esp32c6_v16/firmware.bin
+          if-no-files-found: error
+          retention-days: 7
