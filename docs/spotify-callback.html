@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="referrer" content="no-referrer">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PSA Bridge · Spotify callback</title>
+<style>body{font:16px -apple-system,system-ui,sans-serif;background:#10161e;color:#e8eff8;max-width:680px;margin:40px auto;padding:20px}input,button{font:inherit;padding:12px;border-radius:9px}input{background:#1c2b3a;color:inherit;width:100%;border:1px solid #516377;box-sizing:border-box}button{background:#267e70;border:0;color:white;margin:12px 0}a{color:#8cd9ee}.info{color:#becbdb;line-height:1.5}</style>
+</head>
+<body>
+<h1>Spotify authorization callback</h1>
+<p id="status" class="info">Checking Spotify response…</p>
+<label for="url">Return URL (contains a single-use code)</label>
+<input id="url" readonly autocomplete="off" spellcheck="false">
+<p><button id="copy" type="button">Copy callback URL</button></p>
+<p class="info">Go back to the <a href="http://192.168.100.1/media" rel="noreferrer">PSA Bridge media page</a>, paste this URL into “Complete authorization”, and exchange it there. Do not share it with anyone. This static callback does not send the URL to any server or analytics endpoint.</p>
+<script>
+const params=new URLSearchParams(location.search);
+document.getElementById("url").value=location.href;
+document.getElementById("status").textContent=params.has("error")
+  ?"Spotify returned an authorization error: "+params.get("error")
+  :params.has("code")&&params.has("state")
+    ?"Authorized. Copy the full URL; the bridge will check the OAuth state and exchange the code for tokens."
+    :"No Spotify authorization code and state received.";
+document.getElementById("copy").addEventListener("click",async()=>{
+  const field=document.getElementById("url");
+  try{await navigator.clipboard.writeText(field.value);document.getElementById("status").textContent="Callback URL copied.";}
+  catch(_){field.focus();field.select();document.getElementById("status").textContent="Select the URL above and copy it manually.";}
+});
+</script>
+</body>
+</html>
