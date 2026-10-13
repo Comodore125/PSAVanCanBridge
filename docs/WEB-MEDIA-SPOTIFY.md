@@ -1,4 +1,4 @@
-# Web-only media control experiment (current upstream source)
+# Web-only media control experiment (custom 3.9.2 branch)
 
 Implementation branch: feature/3.9.2-wifi-steering-media, based on wifi-plus-telecoding-from-3.7-proven (commit 3e11723fc985ef44616ab86857e0e557c5b91bf1). **No legacy CAN/VAN forwarding, radio handling, or Wi-Fi parameters are modified.** Existing audio stays on RD45 AUX.
 
