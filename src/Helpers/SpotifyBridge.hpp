@@ -35,11 +35,17 @@ public:
         // Do not accept stale edge counters after boot or Wi-Fi reconnect.
         lastNext_ = __atomic_load_n(&state_->MediaNextCount, __ATOMIC_RELAXED);
         lastPrevious_ = __atomic_load_n(&state_->MediaPreviousCount, __ATOMIC_RELAXED);
-        xTaskCreate(&SpotifyBridge::TaskEntry, "SpotifyCtl", 10240, this, 1, &task_);
+        if (xTaskCreate(&SpotifyBridge::TaskEntry, "SpotifyCtl", 10240, this, 1, &task_) != pdPASS) {
+            // Insufficient RAM: fail closed instead of reporting an enabled
+            // controller that can never consume seek events.
+            printf("SpotifyCtl: task allocation failed\n");
+            vSemaphoreDelete(mutex_);
+            mutex_ = nullptr;
+        }
     }
 
     bool Provision(const char* client, const char* refresh) {
-        if (!client || !refresh || strlen(client) != 32 || strlen(refresh) < 16 ||
+        if (!mutex_ || !client || !refresh || strlen(client) != 32 || strlen(refresh) < 16 ||
             strlen(refresh) >= sizeof(refresh_)) return false;
         for (int i=0;i<32;i++)
             if (!std::isxdigit(static_cast<unsigned char>(client[i]))) return false;
@@ -68,7 +74,7 @@ public:
     }
 
     bool Enable(bool value, bool invert) {
-        if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
+        if (!mutex_ || xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
         if (value && (!clientId_[0] || !refresh_[0])) { xSemaphoreGive(mutex_); return false; }
         nvs_handle_t h = 0;
         bool ok = nvs_open("spotify_bridge", NVS_READWRITE, &h) == ESP_OK;
@@ -87,7 +93,7 @@ public:
     }
 
     bool Clear() {
-        if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
+        if (!mutex_ || xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
         nvs_handle_t h = 0;
         bool ok = nvs_open("spotify_bridge", NVS_READWRITE, &h) == ESP_OK;
         if (ok) { ok = nvs_erase_all(h) == ESP_OK && nvs_commit(h) == ESP_OK; CloseNvs(h); }
