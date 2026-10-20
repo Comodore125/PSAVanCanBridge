@@ -400,10 +400,24 @@ bind("transfer",async()=>{const id=$("devices").value;if(!id)throw Error("Select
 load();
 if(base64url(sha256Ascii("abc"))!=="ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")log("WARNING: SHA-256 self-test FAILED; do not authorize");
 else log("SHA-256 self-test passed; listening for bridge input.");
-document.addEventListener("visibilitychange",()=>{previous=null;if(!document.hidden){pollBridge();if(tokens)refreshPlayer();
+document.addEventListener("visibilitychange",()=>{
+  previous=null;
+  if(!document.hidden) {
+    pollBridge();
+    if(tokens)refreshPlayer();
+    refreshStandalone();
+  }
+});
+// Create only one status timer: returning to this tab must not multiply requests.
+setInterval(()=>{if(!document.hidden)refreshStandalone();},5000);
 refreshStandalone();
-setInterval(()=>{if(!document.hidden)refreshStandalone();},5000);}});
-setInterval(()=>{if(!document.hidden)pollBridge();},400);pollBridge();
+// Standalone ESP32 handles SEEK without browser polling. Keep low-rate diagnostics
+// visible, but reduce unnecessary HTTP/JSON work on the bridge.
+async function pollLoop() {
+  if(!document.hidden) await pollBridge();
+  setTimeout(pollLoop,document.hidden ? 2000 : standaloneEnabled ? 2000 : 400);
+}
+pollLoop();
 setInterval(()=>{if(tokens&&!document.hidden)refreshPlayer();},6500);
 if(tokens)refreshPlayer();
 </script>
