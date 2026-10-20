@@ -13,7 +13,7 @@
 <label for="url">Return URL (contains a single-use code)</label>
 <input id="url" readonly autocomplete="off" spellcheck="false">
 <p><button id="copy" type="button">Copy callback URL</button></p>
-<p class="info">Go back to the <a href="http://192.168.100.1/media" rel="noreferrer">PSA Bridge media page</a>, paste this URL into “Complete authorization”, and exchange it there. Do not share it with anyone. This static callback does not send the URL to any server or analytics endpoint.</p>
+<p class="info">Go back to the same browser tab or bridge <strong>/media</strong> page you used to begin authorization, paste this URL into “Complete authorization”, and exchange it there. Keep the original browser session. Do not share it with anyone. This static callback does not send the URL to any server or analytics endpoint.</p>
 <script>
 const params=new URLSearchParams(location.search);
 document.getElementById("url").value=location.href;

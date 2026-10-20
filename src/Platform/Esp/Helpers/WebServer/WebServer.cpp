@@ -1,5 +1,5 @@
 #include "Helpers/WebServer/WebServer.hpp"
-#include "Helpers/WebServer/MediaPage.hpp"
+#include "Helpers/SpotifyBridge.hpp"
 #include "esp_ota_ops.h"
 #include "esp_image_format.h"
 #include "mdns.h"
@@ -9,6 +9,7 @@
 
 static std::atomic_bool webServerCanBeStarted{false};
 static std::atomic_bool stationIpAcquired{false};
+static std::atomic_bool stationReconnectAllowed{false};
 static std::atomic_bool stationConnectionFailed{false};
 
 namespace
@@ -35,6 +36,10 @@ namespace
         { "/api/time", HTTP_GET, &WebServer::get_time_handler, false },
         { "/media", HTTP_GET, &WebServer::get_media_page_handler, false },
         { "/api/media", HTTP_GET, &WebServer::get_media_status_handler, false },
+        { "/api/spotify/status", HTTP_GET, &WebServer::get_spotify_status_handler, false },
+        { "/api/spotify/provision", HTTP_POST, &WebServer::post_spotify_provision_handler, false },
+        { "/api/spotify/enable", HTTP_POST, &WebServer::post_spotify_enable_handler, false },
+        { "/api/spotify/clear", HTTP_POST, &WebServer::post_spotify_clear_handler, false },
         { "/api/reboot", HTTP_GET, &WebServer::get_reboot_handler, false },
         { "/api/getVin", HTTP_GET, &WebServer::get_vin_handler, false },
         { "/api/config.json", HTTP_GET, &WebServer::get_config_handler, false },
@@ -247,13 +252,14 @@ void WebServer::CreateWebServer()
         {
             StartStationMode();
             ESP_ERROR_CHECK(esp_wifi_start());
-            ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(8));
+            ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
 
             const bool ssidFound = ScanForConfiguredStaNetwork();
             const bool connected = ssidFound && ConnectToStationWithTimeout(STA_CONNECT_TIMEOUT_MS);
 
             if (connected)
             {
+                stationReconnectAllowed = true;
                 StartWebServer();
                 return;
             }
@@ -268,7 +274,7 @@ void WebServer::CreateWebServer()
     {
         StartApMode();
         ESP_ERROR_CHECK(esp_wifi_start());
-        ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(8));
+        ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
         StartWebServer();
     }
 }
@@ -439,6 +445,7 @@ void WebServer::StopWebServer()
 // Stop Wi-Fi
 void WebServer::StopWifi()
 {
+    stationReconnectAllowed = false;
     const esp_err_t stopResult = esp_wifi_stop();
     if (stopResult != ESP_OK && stopResult != ESP_ERR_WIFI_NOT_INIT && stopResult != ESP_ERR_WIFI_NOT_STARTED)
     {
@@ -564,7 +571,10 @@ esp_err_t WebServer::get_media_page_handler(httpd_req_t *req)
     instance->_lastRequestTime = instance->_carState->CurrenTime;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_sendstr(req, media_page_html);
+    // Serve the same media UI as a gzip-compressed static asset, not a ~25 KB
+    // raw string inside the OTA application image.
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    return httpd_resp_send(req, reinterpret_cast<const char*>(media_html), sizeof(media_html));
 }
 
 esp_err_t WebServer::get_media_status_handler(httpd_req_t *req)
@@ -587,6 +597,71 @@ esp_err_t WebServer::get_media_status_handler(httpd_req_t *req)
     const esp_err_t result = httpd_resp_sendstr(req, response);
     cJSON_free((void*)response);
     return result;
+}
+
+
+esp_err_t WebServer::get_spotify_status_handler(httpd_req_t *req)
+{
+    auto* instance = static_cast<WebServer*>(req->user_ctx);
+    instance->_lastRequestTime = instance->_carState->CurrenTime;
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const std::string body = SpotifyBridge::Instance().Status();
+    return httpd_resp_send(req, body.data(), body.size());
+}
+
+esp_err_t WebServer::post_spotify_provision_handler(httpd_req_t *req)
+{
+    if (!SpotifyBridge::IsHotspotAvailable()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Configure and connect station Wi-Fi first");
+        return ESP_OK;
+    }
+    cJSON* root = ReceiveJsonBody(req, 4096);
+    if (!root) return ESP_OK;
+    const cJSON* cid = cJSON_GetObjectItemCaseSensitive(root, "client_id");
+    const cJSON* refresh = cJSON_GetObjectItemCaseSensitive(root, "refresh_token");
+    const bool valid = cJSON_IsString(cid) && cJSON_IsString(refresh) &&
+       SpotifyBridge::Instance().Provision(cid->valuestring, refresh->valuestring);
+    cJSON_Delete(root);
+    if (!valid) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Spotify credentials"); return ESP_OK; }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"configured\":true,\"enabled\":false}");
+}
+
+esp_err_t WebServer::post_spotify_enable_handler(httpd_req_t *req)
+{
+    if (!SpotifyBridge::IsHotspotAvailable()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Station Wi-Fi required");
+        return ESP_OK;
+    }
+    cJSON* root = ReceiveJsonBody(req, 128);
+    if (!root) return ESP_OK;
+    const cJSON* enabled = cJSON_GetObjectItemCaseSensitive(root, "enabled");
+    const bool valid = cJSON_IsBool(enabled);
+    const bool next = cJSON_IsTrue(enabled);
+    const cJSON* invertJson = cJSON_GetObjectItemCaseSensitive(root, "invert");
+    const bool invert = cJSON_IsTrue(invertJson);
+    cJSON_Delete(root);
+    if (!valid || !SpotifyBridge::Instance().Enable(next, invert)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Spotify not configured or NVS unavailable");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, next ? "{\"enabled\":true}" : "{\"enabled\":false}");
+}
+
+esp_err_t WebServer::post_spotify_clear_handler(httpd_req_t *req)
+{
+    if (!SpotifyBridge::IsHotspotAvailable()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Station Wi-Fi required");
+        return ESP_OK;
+    }
+    if (!SpotifyBridge::Instance().Clear()) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Cannot erase Spotify credentials");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"configured\":false,\"enabled\":false}");
 }
 
 esp_err_t WebServer::get_time_handler(httpd_req_t *req)
@@ -1126,6 +1201,10 @@ void WebServer::wifi_event_handler(void* arg, esp_event_base_t event_base, int32
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         stationConnectionFailed = true;
+        // Only reconnect after an earlier successful STA start; never
+        // interfere with initial STA -> fallback AP selection.
+        if (stationReconnectAllowed.load())
+            esp_wifi_connect();
 
         auto *event = static_cast<wifi_event_sta_disconnected_t*>(event_data);
         if (event)

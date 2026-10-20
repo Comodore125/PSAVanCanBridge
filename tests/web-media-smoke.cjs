@@ -6,9 +6,16 @@ const vm = require("node:vm");
 const assert = require("node:assert/strict");
 const { webcrypto } = require("node:crypto");
 
-const header = fs.readFileSync(path.join(__dirname, "../src/Helpers/WebServer/MediaPage.hpp"), "utf8");
+const { execFileSync } = require("node:child_process");
+const rootDir = path.join(__dirname, "..");
+const python = process.platform === "win32" ? "python" : "python3";
+// Exercise the exact optimized JavaScript the ESP32 serves, not just the
+// original readable data/media.html source.
+const header = execFileSync(python, ["scripts/minify_html_js.py", "data/media.html"], {
+  cwd: rootDir, encoding: "utf8", maxBuffer: 1024*1024
+});
 const match = header.match(/<script>([\s\S]*?)<\/script>/);
-assert.ok(match, "Expected an embedded browser script");
+assert.ok(match, "Expected media HTML browser script");
 const code = match[1];
 new vm.Script(code);
 
@@ -39,7 +46,13 @@ let simulated = [
   { next_count: 1, previous_count: 1, seek_up: false, seek_down: true },
 ];
 let offline = false;
-async function fakeFetch() {
+async function fakeFetch(url, opts={}) {
+  if (String(url).includes("/api/spotify/status")) {
+    return {ok:true, json:async()=>({ready:true, configured:false,enabled:false,online:false,last_http:0,last_action:"",error:""})};
+  }
+  if (String(url).includes("/api/spotify/")) {
+    return {ok:true, json:async()=>({configured:true,enabled:!!opts.body&&JSON.parse(opts.body).enabled===true})};
+  }
   if (offline) throw new Error("Simulated Wi-Fi outage");
   return { ok: true, json: async () => simulated.shift() || {next_count:1,previous_count:1} };
 }
@@ -74,6 +87,14 @@ async function main() {
   const lines = element("log").textContent.split("\n").filter(line => line.includes("Stalk event:"));
   assert.equal(lines.length, 2, "Two edges, not three repeated frames");
   assert.equal(element("active").checked, false, "Stalk forwarding off by default");
+  await vm.runInContext("refreshStandalone()",context);
+  assert.equal(element("standaloneState").textContent,"Not installed","No stored secrets in test fixture");
+  // Background controller disables the browser forwarding path to prevent duplicate commands.
+  await vm.runInContext(`(() => { const oldFetch = fetch; fetch = async (url) => String(url).includes("/api/spotify/status") ?
+    ({ok:true,json:async()=>({configured:true,enabled:true,online:true,last_http:204,last_action:"next",error:""})}) : oldFetch(url);
+    return refreshStandalone().finally(()=>{fetch=oldFetch;}); })()`,context);
+  assert.equal(element("active").disabled,true,"No double control when ESP32 is autonomous");
+  assert.equal(element("active").checked,false,"Autonomous control unchecks browser forwarding");
 
   offline = true;
   await vm.runInContext("pollBridge()",context);await settle();
@@ -89,6 +110,6 @@ async function main() {
   element("callbackValue").value="https://example.org/callback?code=thecode&state=attacker";
   await assert.rejects(vm.runInContext("finishAuth()",context),/OAuth state mismatch/,"CSRF state protection");
 
-  console.log("PASS: browser syntax, SHA-256 and RFC 7636, stalk edges, startup, reconnect, disabled-by-default and OAuth state checks.");
+  console.log("PASS: browser syntax, SHA-256 + PKCE, stalk edges, reconnect, no duplicate Spotify forwarding, and OAuth state checks.");
 }
 main().catch(error => { console.error(error); process.exitCode=1; });

@@ -6,6 +6,11 @@ idf_component_register(
     # than from IDF's ulp component. Mirror the IDF 6.x ULP runtime dependencies
     # so its generated LP project receives every required HAL include path.
     PRIV_REQUIRES
+        esp_http_client
+        nvs_flash
+        mbedtls
+        esp_wifi
+        esp_netif
         lp_core_van
         esp_adc
         esp_driver_gpio

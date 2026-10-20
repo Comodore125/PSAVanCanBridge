@@ -43,6 +43,7 @@
 #include "Helpers/CrcStore.hpp"
 #include "Helpers/CpuConfig.h"
 #include "Helpers/WebServer/WebServer.hpp"
+#include "Helpers/SpotifyBridge.hpp"
 #include "Helpers/PSADiag/PsaDiagLib.h"
 #include "Helpers/FuelRefillTracker.hpp"
 #include "Application/BridgeRuntime.hpp"
@@ -288,6 +289,7 @@ extern "C" void app_main(void)
     webSocketSerial = new WebSocketSerial(carState);
     webServer = new WebServer(carState, configFile, timeProvider, fuelRefillTracker, webSocketSerial, SendImmediateSignalToDestination);
     webServer->CreateWebServer();
+    SpotifyBridge::Instance().Start(carState);
     printf("Webserver created\n");
 
     //if (carState->SOURCE_PROTOCOL == carState->DESTINATION_PROTOCOL)

@@ -12,3 +12,32 @@ CONFIG_ULP_COPROC_RESERVE_MEM=12000
 # PlatformIO's ESP-IDF 6.1 LP Core build currently requires Newlib flags that
 # are not provided by its Picolibc integration.
 CONFIG_LIBC_NEWLIB=y
+
+# Spotify needs HTTPS outbound connections only; the built-in web UI is HTTP.
+# Retain root-certificate and hostname verification, ECDHE, and TLS 1.2.
+# Trim TLS server-only and unused protocol features to fit current OTA slots.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+CONFIG_MBEDTLS_FS_IO=n
+CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
+CONFIG_MBEDTLS_SSL_CACHE_C=n
+# ALPN support is required by esp_http_client link dependencies.
+CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
+CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
+CONFIG_MBEDTLS_X509_REMOVE_INFO=y
+CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
+# PK write must remain enabled: WPA supplicant calls mbedtls_pk_write_pubkey_der.
+CONFIG_MBEDTLS_PEM_WRITE_C=n
+
+# Preserve full printf/snprintf formatting for diagnostics and telecoding.
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=n
+
+# iPhone hotspot and local bridge API use IPv4. Keep IPv4 and mDNS.
+CONFIG_LWIP_IPV6=n
+
+# ESP-IDF 6 binary-size optimizations without dropping warning/error logs:
+# Log V2 stores shorter format strings; C++ constexpr cold reduces libstdc++.
+CONFIG_LOG_VERSION_2=y
+# PlatformIO shell command cannot quote cold-constexpr macros safely; skip.
+# Only impacts esp_err_to_name debug strings (error codes remain available).
+CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
