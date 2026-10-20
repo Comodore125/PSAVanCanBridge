@@ -39,6 +39,8 @@ public:
             if (nvs_get_str(handle, "refresh", refresh_, &length) != ESP_OK) refresh_[0] = '\0';
             uint8_t enabled = 0;
             if (nvs_get_u8(handle, "enabled", &enabled) == ESP_OK) enabled_ = enabled != 0;
+            uint8_t invert = 0;
+            if (nvs_get_u8(handle, "invert", &invert) == ESP_OK) invert_ = invert != 0;
             nvs_close(handle);
         }
         // Do not accept stale edge counters after boot or Wi-Fi reconnect.
@@ -59,6 +61,7 @@ public:
             ok = nvs_set_str(h, "client_id", client) == ESP_OK &&
                  nvs_set_str(h, "refresh", refresh) == ESP_OK &&
                  nvs_set_u8(h, "enabled", 0) == ESP_OK &&
+                 nvs_set_u8(h, "invert", 0) == ESP_OK &&
                  nvs_commit(h) == ESP_OK;
             nvs_close(h);
         }
@@ -66,6 +69,7 @@ public:
             snprintf(clientId_, sizeof(clientId_), "%s", client);
             snprintf(refresh_, sizeof(refresh_), "%s", refresh);
             enabled_ = false;
+            invert_ = false;
             access_.clear();
             expiresMs_ = 0;
             error_ = "Credentials installed; enable control explicitly";
@@ -74,17 +78,20 @@ public:
         return ok;
     }
 
-    bool Enable(bool value) {
+    bool Enable(bool value, bool invert) {
         if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
         if (value && (!clientId_[0] || !refresh_[0])) { xSemaphoreGive(mutex_); return false; }
         nvs_handle_t h;
         bool ok = nvs_open("spotify_bridge", NVS_READWRITE, &h) == ESP_OK;
         if (ok) {
-            ok = nvs_set_u8(h, "enabled", value ? 1 : 0) == ESP_OK && nvs_commit(h) == ESP_OK;
+            ok = nvs_set_u8(h, "enabled", value ? 1 : 0) == ESP_OK &&
+                 nvs_set_u8(h, "invert", invert ? 1 : 0) == ESP_OK &&
+                 nvs_commit(h) == ESP_OK;
             nvs_close(h);
         }
         if (ok) {
             enabled_ = value;
+            invert_ = invert;
         }
         xSemaphoreGive(mutex_);
         return ok;
@@ -115,6 +122,7 @@ public:
         cJSON_AddBoolToObject(json, "ready", true);
         cJSON_AddBoolToObject(json, "configured", clientId_[0] && refresh_[0]);
         cJSON_AddBoolToObject(json, "enabled", enabled_);
+        cJSON_AddBoolToObject(json, "invert", invert_);
         cJSON_AddBoolToObject(json, "online", IsStationConnected());
         cJSON_AddStringToObject(json, "last_action", lastAction_.c_str());
         cJSON_AddStringToObject(json, "error", error_.c_str());
@@ -137,6 +145,7 @@ private:
     char clientId_[33]{};
     char refresh_[2048]{};
     bool enabled_ = false;
+    bool invert_ = false;
     std::string access_;
     uint64_t expiresMs_ = 0;
     uint64_t retryAfterMs_ = 0;
@@ -286,9 +295,10 @@ private:
             const uint32_t newNext = next - lastNext_, newPrev = prev - lastPrevious_;
             lastNext_ = next;
             lastPrevious_ = prev;
-            bool enabled, configured;
+            bool enabled, configured, invert;
             xSemaphoreTake(mutex_,portMAX_DELAY);
             enabled = enabled_;
+            invert = invert_;
             configured = clientId_[0] && refresh_[0];
             xSemaphoreGive(mutex_);
             if (!enabled || !configured || !IsStationConnected()) continue;
@@ -299,8 +309,8 @@ private:
             // Certificate validation requires valid wall-clock time.
             if (time(nullptr)<1704067200) continue;
             if (newNext + newPrev > 4 || NowMs() < retryAfterMs_) continue;
-            for(uint32_t i=0;i<newNext;i++) if (!SendAction("next")) break;
-            for(uint32_t i=0;i<newPrev;i++) if (!SendAction("previous")) break;
+            for(uint32_t i=0;i<newNext;i++) if (!SendAction(invert ? "previous" : "next")) break;
+            for(uint32_t i=0;i<newPrev;i++) if (!SendAction(invert ? "next" : "previous")) break;
         }
     }
 };
