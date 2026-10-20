@@ -67,6 +67,20 @@
 
 </header>
 
+<section id="rd45Probe" style="margin:12px;padding:14px;border:1px solid #697d91;border-radius:12px;background:#142231;color:#f0f5fc;font:14px system-ui">
+  <strong>RD45 physical-button CAN probe (read-only)</strong>
+  <p style="margin:6px 0">Use Destination / Incoming and leave ID filter empty. Capture idle traffic, then press NEXT or PREVIOUS on the radio while capturing. This compares bus traffic, not proof of its source.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button id="probeIdle" type="button">1. Capture idle</button>
+    <button id="probePress" type="button">2. Capture button</button>
+    <button id="probeAnalyze" type="button">3. Compare</button>
+    <button id="probeReset" type="button">Reset probe</button>
+    <button id="probeExport" type="button">Export comparison</button>
+  </div>
+  <p id="probeStatus" role="status" style="margin:8px 0">Not recording.</p>
+  <div id="probeResults" style="overflow-x:auto;white-space:pre-wrap;font:12px ui-monospace,monospace"></div>
+</section>
+
 <div id="container">
 
     <!-- DESKTOP -->
@@ -377,6 +391,8 @@ function handleFrame(raw) {
     const data =
         frame.data || [];
 
+    rd45Probe.record(id, data);
+
     const d = new Date();
 
     const ts =
@@ -447,6 +463,84 @@ function handleFrame(raw) {
 
     state.last = [...data];
 }
+
+
+/* RD45 probe: bounded, receive-only browser analysis. No ECU TX or monitor changes. */
+const rd45Probe = (() => {
+    const MAX_SAMPLES = 25000;
+    const capture = { idle: new Map(), press: new Map() };
+    let mode = null, samples = 0, lastReport = "";
+    const el = id => document.getElementById(id);
+    function status(s) { el("probeStatus").textContent = s; }
+    function record(id, data) {
+        if (!mode || samples >= MAX_SAMPLES) return;
+        const normalized = String(id).toUpperCase().replace(/^0X/, "");
+        const bytes = (Array.isArray(data) ? data : []).map(b => String(b).toUpperCase().padStart(2, "0"));
+        if (!/^[0-9A-F]{1,8}$/.test(normalized) || bytes.some(b => !/^[0-9A-F]{2}$/.test(b))) return;
+        const bucket = capture[mode];
+        if (!bucket.has(normalized)) bucket.set(normalized, { count: 0, samples: [], signatures: new Map() });
+        const entry = bucket.get(normalized);
+        entry.count++;
+        const signature = bytes.join(" ");
+        entry.signatures.set(signature, (entry.signatures.get(signature) || 0) + 1);
+        if (entry.samples.length < 12) entry.samples.push(signature);
+        samples++;
+        if (samples === MAX_SAMPLES) status("Sample limit reached. Click Compare.");
+    }
+    function start(next) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+            status("Connect WebSocket first; select Destination / Incoming.");
+            return;
+        }
+        if (getSelectedNetwork() !== 2 || getSelectedDirection() !== 1 || getFilterIds().size) {
+            status("Select Destination / Incoming and clear ID filter.");
+            return;
+        }
+        capture[next].clear();
+        samples = 0;
+        mode = next;
+        status("Capturing " + next + " until you click Compare or start another capture (max " + MAX_SAMPLES + " frames).");
+    }
+    function compare() {
+        mode = null;
+        const idle = capture.idle, press = capture.press;
+        const ids = [...new Set([...idle.keys(), ...press.keys()])];
+        const rows = ids.map(id => {
+            const a = idle.get(id), b = press.get(id);
+            const aS = a?.signatures || new Map(), bS = b?.signatures || new Map();
+            const added = [...bS].filter(([s]) => !aS.has(s)).map(([s,n]) => ({ data:s, count:n }));
+            const removed = [...aS].filter(([s]) => !bS.has(s)).map(([s,n]) => ({ data:s, count:n }));
+            return { id, idleFrames:a?.count||0, pressFrames:b?.count||0, added, removed,
+                score:added.reduce((n,x)=>n+x.count,0) };
+        }).filter(x=>x.score || (x.idleFrames === 0 && x.pressFrames > 0))
+          .sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id));
+        const header = "CAN ID | idle | button | novel frames | sample novel payloads";
+        const lines = rows.slice(0,120).map(x => x.id+" | "+x.idleFrames+" | "+x.pressFrames+
+            " | "+x.score+" | "+x.added.slice(0,4).map(s=>s.data+" ("+s.count+")").join("; "));
+        lastReport = [header,...lines].join("\n");
+        el("probeResults").textContent = lastReport || "No observable frame differences.";
+        status("Compared "+ids.length+" IDs; "+rows.length+" candidate IDs. Different traffic can be unrelated to buttons. Repeat each test, preferably with no other user interactions.");
+    }
+    function reset() {
+        mode = null; samples = 0; lastReport = "";
+        capture.idle.clear(); capture.press.clear();
+        el("probeResults").textContent = "";
+        status("Probe cleared.");
+    }
+    function exportReport() {
+        const blob = new Blob([lastReport || "No comparison yet."], { type:"text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href=url; a.download="RD45_button_CAN_comparison.txt"; a.click();
+        setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }
+    el("probeIdle").addEventListener("click",()=>start("idle"));
+    el("probePress").addEventListener("click",()=>start("press"));
+    el("probeAnalyze").addEventListener("click",compare);
+    el("probeReset").addEventListener("click",reset);
+    el("probeExport").addEventListener("click",exportReport);
+    return { record };
+})();
 
 /* ================= DESKTOP ================= */
 
