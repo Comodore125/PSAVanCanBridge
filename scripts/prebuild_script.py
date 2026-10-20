@@ -3,6 +3,9 @@ import os
 import gzip
 from pathlib import Path
 import mimetypes
+import sys
+sys.path.insert(0, str(Path("scripts").resolve()))
+from minify_html_js import minify_html_js
 
 ARDUINO_INCLUDES = "#include <Arduino.h>\n\n"
 BYTES_PER_LINE = 20
@@ -28,6 +31,10 @@ def generate_cpp_variable(file_path, file_id, file_buffer):
     """Generate the C++ variable for the given file."""
     file_name = os.path.basename(file_path).replace(".", "_")
     variable_name = f"{file_name}"
+    # Only optimize embedded JS in the telecoding page; the original
+    # human-readable ECU diagnostics source and external ECU JSON stay intact.
+    if os.path.basename(file_path) == "telecoding.html":
+        file_buffer = minify_html_js(file_buffer)
     compressed_data = gzip.compress(file_buffer, compresslevel=9, mtime=0)
     hex_array = ", ".join(
         f"0x{byte:02X}" for byte in compressed_data
