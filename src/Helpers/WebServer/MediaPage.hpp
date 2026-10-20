@@ -266,6 +266,7 @@ async function refreshStandalone() {
       !info.enabled ? "Installed / disabled" : info.online ? "Active on ESP32" : "Waiting for hotspot";
     $("standaloneAction").textContent = (info.last_action || "No command yet")+" / "+(info.last_http||"—");
     $("standaloneError").textContent = info.error || "";
+    if (info.configured && !standaloneEnabled) $("invert").checked = !!info.invert;
     $("active").disabled = standaloneEnabled;
     if (standaloneEnabled) $("active").checked = false; // Prevent duplicate browser + ESP32 actions.
   } catch(e) {
@@ -282,11 +283,11 @@ bind("standaloneInstall",async()=>{
   await refreshStandalone();
 });
 bind("standaloneEnable",async()=>{
-  await bridgeSpotify("POST","enable",{enabled:true});
+  await bridgeSpotify("POST","enable",{enabled:true,invert:$("invert").checked});
   await refreshStandalone();
 });
 bind("standaloneDisable",async()=>{
-  await bridgeSpotify("POST","enable",{enabled:false});
+  await bridgeSpotify("POST","enable",{enabled:false,invert:$("invert").checked});
   await refreshStandalone();
 });
 bind("standaloneClear",async()=>{
