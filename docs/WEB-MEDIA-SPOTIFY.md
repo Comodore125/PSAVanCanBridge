@@ -46,7 +46,8 @@ This integration provides next/previous commands only; the previous browser
    ESP-IDF certificate validation. The access token is renewed automatically.
 5. **Play Spotify:** Start Spotify playback normally on the iPhone, route
    its audio through FiiO DAC / RD45 AUX. Keep Waze in foreground if wanted.
-   Press the COM2000 seek controls to change tracks.
+   Press the COM2000 seek controls to change tracks. The existing **Swap seek
+   directions** checkbox is applied when you tap Enable autonomous SEEK.
 6. **Check:** View \`/media\` background status. \`GET /api/spotify/status\`
    reports configured/enabled/online, last action and HTTP response code,
    **never** tokens. Use Disable or Erase when needed.
