@@ -31,9 +31,9 @@ def generate_cpp_variable(file_path, file_id, file_buffer):
     """Generate the C++ variable for the given file."""
     file_name = os.path.basename(file_path).replace(".", "_")
     variable_name = f"{file_name}"
-    # Only optimize embedded JS in the telecoding page; the original
-    # human-readable ECU diagnostics source and external ECU JSON stay intact.
-    if os.path.basename(file_path) == "telecoding.html":
+    # Optimize embedded JS whitespace/comments for static browser pages only.
+    # The original, readable HTML and external ECU JSON files stay intact.
+    if os.path.basename(file_path) in {"telecoding.html", "index.html", "dashboard.html", "carstate.html", "monitor.html", "media.html"}:
         file_buffer = minify_html_js(file_buffer)
     compressed_data = gzip.compress(file_buffer, compresslevel=9, mtime=0)
     hex_array = ", ".join(
