@@ -6,7 +6,14 @@ const vm = require("node:vm");
 const assert = require("node:assert/strict");
 const { webcrypto } = require("node:crypto");
 
-const header = fs.readFileSync(path.join(__dirname, "../data/media.html"), "utf8");
+const { execFileSync } = require("node:child_process");
+const rootDir = path.join(__dirname, "..");
+const python = process.platform === "win32" ? "python" : "python3";
+// Exercise the exact optimized JavaScript the ESP32 serves, not just the
+// original readable data/media.html source.
+const header = execFileSync(python, ["scripts/minify_html_js.py", "data/media.html"], {
+  cwd: rootDir, encoding: "utf8", maxBuffer: 1024*1024
+});
 const match = header.match(/<script>([\s\S]*?)<\/script>/);
 assert.ok(match, "Expected media HTML browser script");
 const code = match[1];
