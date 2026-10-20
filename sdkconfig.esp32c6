@@ -3,10 +3,6 @@
 # Both C6 images exceed the OTA application slot with IDF 6.1's debug
 # optimization, so use the size-optimized release configuration.
 CONFIG_COMPILER_OPTIMIZATION_SIZE=y
-# Experimental: try LTO to fit HTTPS Spotify into existing 0x140000 OTA slot.
-# Must be bench-tested for CAN/VAN timing and stack high-water before vehicle use.
-CONFIG_COMPILER_LTO_LINKTIME=y
-CONFIG_COMPILER_LTO_COMPILETIME=y
 
 # LP Core owns timing-critical VAN bus work on C6 boards.
 CONFIG_ULP_COPROC_ENABLED=y
