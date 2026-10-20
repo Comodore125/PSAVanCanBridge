@@ -637,8 +637,10 @@ esp_err_t WebServer::post_spotify_enable_handler(httpd_req_t *req)
     const cJSON* enabled = cJSON_GetObjectItemCaseSensitive(root, "enabled");
     const bool valid = cJSON_IsBool(enabled);
     const bool next = cJSON_IsTrue(enabled);
+    const cJSON* invertJson = cJSON_GetObjectItemCaseSensitive(root, "invert");
+    const bool invert = cJSON_IsTrue(invertJson);
     cJSON_Delete(root);
-    if (!valid || !SpotifyBridge::Instance().Enable(next)) {
+    if (!valid || !SpotifyBridge::Instance().Enable(next, invert)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Spotify not configured or NVS unavailable");
         return ESP_OK;
     }
