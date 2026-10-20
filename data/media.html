@@ -258,10 +258,11 @@ async function refreshStandalone() {
   try {
     const info = await bridgeSpotify("GET","status");
     standaloneEnabled = !!info.enabled;
-    $("standaloneState").textContent = !info.configured ? "Not installed" :
+    $("standaloneState").textContent = info.ready === false ? "Controller unavailable" : !info.configured ? "Not installed" :
       !info.enabled ? "Installed / disabled" : info.online ? "Active on ESP32" : "Waiting for hotspot";
     $("standaloneAction").textContent = (info.last_action || "No command yet")+" / "+(info.last_http||"—");
-    $("standaloneError").textContent = info.error || "";
+    $("standaloneError").textContent = info.ready === false
+      ? "Spotify task is not running; check free heap and serial logs." : (info.error || "");
     if (info.configured && standaloneEnabled) $("invert").checked = !!info.invert;
     $("active").disabled = standaloneEnabled;
     if (standaloneEnabled) $("active").checked = false; // Prevent duplicate browser + ESP32 actions.
