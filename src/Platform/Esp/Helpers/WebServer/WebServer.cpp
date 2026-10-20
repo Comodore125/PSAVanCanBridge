@@ -10,6 +10,7 @@
 
 static std::atomic_bool webServerCanBeStarted{false};
 static std::atomic_bool stationIpAcquired{false};
+static std::atomic_bool stationReconnectAllowed{false};
 static std::atomic_bool stationConnectionFailed{false};
 
 namespace
@@ -259,6 +260,7 @@ void WebServer::CreateWebServer()
 
             if (connected)
             {
+                stationReconnectAllowed = true;
                 StartWebServer();
                 return;
             }
@@ -444,6 +446,7 @@ void WebServer::StopWebServer()
 // Stop Wi-Fi
 void WebServer::StopWifi()
 {
+    stationReconnectAllowed = false;
     const esp_err_t stopResult = esp_wifi_stop();
     if (stopResult != ESP_OK && stopResult != ESP_ERR_WIFI_NOT_INIT && stopResult != ESP_ERR_WIFI_NOT_STARTED)
     {
@@ -1194,6 +1197,10 @@ void WebServer::wifi_event_handler(void* arg, esp_event_base_t event_base, int32
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         stationConnectionFailed = true;
+        // Only reconnect after an earlier successful STA start; never
+        // interfere with initial STA -> fallback AP selection.
+        if (stationReconnectAllowed.load())
+            esp_wifi_connect();
 
         auto *event = static_cast<wifi_event_sta_disconnected_t*>(event_data);
         if (event)
