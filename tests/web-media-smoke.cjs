@@ -114,6 +114,22 @@ async function main() {
   assert.equal(element("active").checked, false, "Stalk forwarding off by default");
   await vm.runInContext("refreshStandalone()",context);
   assert.equal(element("standaloneState").textContent,"Not installed","No stored secrets in test fixture");
+  assert.equal(element("radioSourceState").textContent,"Unknown / stale",
+    "No source status at startup is unknown");
+  // All Spotify write requests (including browser NEXT) must fail closed
+  // when the RD45 has not reported AUX. No Spotify tokens are needed to test this.
+  await assert.rejects(vm.runInContext('spotify("/me/player/next","POST")',context),
+    /require RD45 AUX1\/AUX2/, "Browser cannot skip Spotify outside AUX");
+  // When CAN source is AUX1 and the radio state is fresh, the UI must expose it.
+  await vm.runInContext(`(() => { const oldFetch = fetch; fetch = async (url) =>
+    String(url).includes("/api/spotify/status") ?
+    ({ok:true,json:async()=>({ready:true,configured:true,enabled:true,online:true,
+       aux_active:true,radio_source:4,last_http:204,last_action:"next",error:""})}) : oldFetch(url);
+    return refreshStandalone().finally(()=>{fetch=oldFetch;}); })()`,context);
+  assert.equal(element("radioSourceState").textContent,"AUX 1","CAN source is displayed");
+  assert.equal(element("standaloneState").textContent,"Active on ESP32",
+    "Only active with AUX source and network");
+
   await vm.runInContext(`(() => { const oldFetch = fetch; fetch = async (url) =>
     String(url).includes("/api/spotify/status") ?
     ({ok:true,json:async()=>({ready:false})}) : oldFetch(url);
