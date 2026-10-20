@@ -19,6 +19,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "Helpers/CarState.hpp"
+#include "Helpers/RadioAudioSource.hpp"
 
 class SpotifyBridge {
 public:
@@ -119,6 +120,11 @@ public:
         cJSON_AddBoolToObject(json, "enabled", enabled_);
         cJSON_AddBoolToObject(json, "invert", invert_);
         cJSON_AddBoolToObject(json, "online", IsStationConnected());
+        const uint32_t radio = state_ ?
+            __atomic_load_n(&state_->RadioAudioSourceStamped, __ATOMIC_RELAXED) : 0U;
+        const uint8_t currentSource = RadioAudioSource::FreshSource(radio, NowMs());
+        cJSON_AddNumberToObject(json, "radio_source", currentSource);
+        cJSON_AddBoolToObject(json, "aux_active", currentSource == 4U || currentSource == 5U);
         cJSON_AddStringToObject(json, "last_action", lastAction_.c_str());
         cJSON_AddStringToObject(json, "error", error_.c_str());
         cJSON_AddNumberToObject(json, "last_http", lastHttp_);
@@ -265,13 +271,19 @@ private:
         memset(refreshCopy,0,sizeof(refreshCopy));
         return valid;
     }
+    bool AuxSelected() const {
+        return state_ && RadioAudioSource::IsAux(
+            __atomic_load_n(&state_->RadioAudioSourceStamped, __ATOMIC_RELAXED), NowMs());
+    }
     bool SendAction(const char* action) {
-        if (NowMs() < retryAfterMs_) return false;
+        if (!AuxSelected() || NowMs() < retryAfterMs_) return false;
         bool expired;
         xSemaphoreTake(mutex_,portMAX_DELAY);
         expired = access_.empty() || NowMs() >= expiresMs_;
         xSemaphoreGive(mutex_);
         if (expired && !RefreshAccess()) return false;
+        // Token renewal can take seconds; re-check the radio before issuing the command.
+        if (!AuxSelected()) return false;
         std::string bearer;
         xSemaphoreTake(mutex_,portMAX_DELAY);
         bearer=access_;
@@ -280,7 +292,7 @@ private:
         Response result = Request(uri.c_str(),"POST","","application/json",bearer.c_str());
         if (result.code==401) {
             xSemaphoreTake(mutex_,portMAX_DELAY); access_.clear(); xSemaphoreGive(mutex_);
-            if (RefreshAccess()) {
+            if (RefreshAccess() && AuxSelected()) {
                 xSemaphoreTake(mutex_,portMAX_DELAY); bearer=access_; xSemaphoreGive(mutex_);
                 result=Request(uri.c_str(),"POST","","application/json",bearer.c_str());
             }
@@ -322,7 +334,9 @@ private:
             invert = invert_;
             configured = clientId_[0] && refresh_[0];
             xSemaphoreGive(mutex_);
-            if (!enabled || !configured || !IsStationConnected()) continue;
+            // Original radio/stalk behavior is always untouched. Spotify follows
+            // observed radio source only when a fresh CAN 0x165 says AUX1/AUX2.
+            if (!enabled || !configured || !AuxSelected() || !IsStationConnected()) continue;
             if (!sntpStarted) {
                 esp_sntp_config_t ntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
                 if (esp_netif_sntp_init(&ntp)==ESP_OK) sntpStarted=true;
