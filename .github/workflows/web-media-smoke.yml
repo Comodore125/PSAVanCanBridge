@@ -4,7 +4,7 @@ on:
     branches: [feature/3.9.2-wifi-steering-media]
   pull_request:
     paths:
-      - "src/Helpers/WebServer/MediaPage.hpp"
+      - "data/media.html"
       - "src/Helpers/WebServer/WebServer.hpp"
       - "src/Protocol/AEE2001/Handlers/BSI/MessageHandler_9C4.hpp"
       - "src/Helpers/CarState.hpp"
@@ -22,9 +22,10 @@ jobs:
           node-version: "22"
       - name: Offline media page smoke checks
         run: node tests/web-media-smoke.cjs
-      - name: Verify embedded HTML header compiles in C++17
+      - name: Check media HTML extraction
         run: |
-          printf '#include "src/Helpers/WebServer/MediaPage.hpp"\nint main(){return media_page_html[0] == 0;}\n' | g++ -std=c++17 -I. -x c++ -fsyntax-only -
+          test -s data/media.html
+          grep -q "</html>" data/media.html
 
   firmware-c6:
     runs-on: ubuntu-latest
