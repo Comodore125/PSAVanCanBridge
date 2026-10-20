@@ -38,7 +38,18 @@ function memoryStorage() {
 }
 const documentListeners = new Map();
 const intervalDelays = [];
-const timeoutDelays = [];
+const pendingTimeouts = new Map();
+let nextTimeoutId = 0;
+function mediaTimers() {
+  return [...pendingTimeouts.values()].filter(t => t.delay === 400 || t.delay === 2000);
+}
+async function fireMediaTimer() {
+  const entry = [...pendingTimeouts.entries()].find(([, t]) => t.delay === 400 || t.delay === 2000);
+  assert.ok(entry, "Media timer must be scheduled");
+  pendingTimeouts.delete(entry[0]);
+  entry[1].callback();
+  await settle();
+}
 const documents = {
   hidden: false,
   getElementById: element,
@@ -73,8 +84,12 @@ const context = vm.createContext({
   sessionStorage: tokens,
   fetch: fakeFetch,
   setInterval: (_fn, ms) => { intervalDelays.push(ms); return intervalDelays.length; },
-  setTimeout: (_fn, ms) => { timeoutDelays.push(ms); return timeoutDelays.length; },
-  clearTimeout: () => {},
+  setTimeout: (callback, delay) => {
+    const id = ++nextTimeoutId;
+    pendingTimeouts.set(id, {callback, delay});
+    return id;
+  },
+  clearTimeout: (id) => { pendingTimeouts.delete(id); },
   crypto: webcrypto,
   AbortController,
   URL,
@@ -120,24 +135,33 @@ async function main() {
   element("callbackValue").value="https://example.org/callback?code=thecode&state=attacker";
   await assert.rejects(vm.runInContext("finishAuth()",context),/OAuth state mismatch/,"CSRF state protection");
 
-  // Switching between dashboard and media must never create extra status timers.
+  // Match the upstream dashboard: after completing a fetch, schedule exactly one
+  // subsequent fetch, and stop completely while the page is hidden.
   assert.equal(intervalDelays.filter(ms => ms === 5000).length, 1, "Exactly one status timer after boot");
   const visibilityCallbacks = documentListeners.get("visibilitychange") || [];
   assert.equal(visibilityCallbacks.length, 1, "Single visibility listener");
+  assert.equal(mediaTimers().length, 1, "One media timer after initial polling");
+
   for(let i=0;i<5;i++) {
     documents.hidden = true;
     visibilityCallbacks[0]();
+    await settle();
+    assert.equal(mediaTimers().length, 0, "No media polling when tab is hidden");
     documents.hidden = false;
     visibilityCallbacks[0]();
     await settle();
+    assert.equal(mediaTimers().length, 1, "One resumed media timer, no duplicates");
   }
   assert.equal(intervalDelays.filter(ms => ms === 5000).length, 1,
     "Foreground/background switches cannot multiply status requests");
 
-  // When ESP32 handles SEEK autonomously, browser HTTP polling should slow down.
-  await vm.runInContext("pollLoop()", context);
+  await fireMediaTimer();
+  assert.equal(mediaTimers().length, 1, "One media timer after fetch completes");
+  assert.equal(mediaTimers()[0].delay, 2000, "Autonomous mode uses 2s browser diagnostics");
+  documents.hidden = true;
+  visibilityCallbacks[0]();
   await settle();
-  assert.ok(timeoutDelays.includes(2000), "Autonomous media polling uses a 2s interval");
-  console.log("PASS: browser syntax, SHA-256 + PKCE, stalk edges, reconnect, OAuth state, one status timer, low-rate autonomous polling.");
+  assert.equal(mediaTimers().length, 0, "No autonomous timer left in background");
+  console.log("PASS: browser syntax, SHA-256 + PKCE, stalk edges, reconnect, OAuth state, no background timer, one status timer.");
 }
 main().catch(error => { console.error(error); process.exitCode=1; });
