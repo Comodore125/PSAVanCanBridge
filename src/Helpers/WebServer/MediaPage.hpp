@@ -66,6 +66,22 @@ summary{cursor:pointer}a{color:#91dbff}
 <button id="exchange">3 · Complete authorization</button>
 <p class="muted">Tokens stay in this browser's session storage only. Navigation to a different browser or a Private tab loses the session. Spotify access needs Internet even while connected to the bridge's Wi-Fi.</p>
 </section>
+<section class="card" id="standaloneCard">
+<h2>Background Spotify control · ESP32</h2>
+<p class="muted">Once authorized, install Spotify permissions onto the bridge and enable autonomous seek handling. Your normal iPhone Spotify app plays through FiiO USB DAC → RD45 AUX. Waze may stay in the foreground; Safari is not required after setup.</p>
+<div class="grid">
+  <div><label>Bridge controller</label><span id="standaloneState" class="status">Checking…</span></div>
+  <div><label>Last action / Spotify HTTP</label><strong id="standaloneAction">—</strong></div>
+</div>
+<p id="standaloneError" class="muted" role="status"></p>
+<div class="row">
+<button id="standaloneInstall">Install authorization on bridge</button>
+<button id="standaloneEnable" class="good">Enable autonomous SEEK</button>
+<button id="standaloneDisable">Disable autonomous SEEK</button>
+<button id="standaloneClear" class="danger">Erase bridge Spotify authorization</button>
+</div>
+<p class="muted">Provisioning works only while the bridge is connected to a secure Wi-Fi station/hotspot with Internet access. You must authorize Spotify first using the existing PKCE controls above. Once enabled, the bridge handles steering-stalk presses itself, without web-page polling. It does not change CAN/VAN traffic or audio routing. Credentials are stored locally in ESP32 NVS; do not enable this on an untrusted network.</p>
+</section>
 <section class="card">
 <h2>Now playing</h2>
 <div class="now"><img id="art" alt="Album art"><div>
@@ -229,6 +245,55 @@ async function spotify(path, method="GET", obj) {
   }
   return res.json();
 }
+
+const standaloneApi = location.origin + "/api/spotify/";
+let standaloneEnabled = false;
+async function bridgeSpotify(method, name, payload) {
+  const response = await fetch(standaloneApi+name, {
+    method,
+    cache:"no-store",
+    headers: payload===undefined ? {} : {"Content-Type":"application/json"},
+    body: payload===undefined ? undefined : JSON.stringify(payload)
+  });
+  if(!response.ok) throw Error("Bridge Spotify "+name+": HTTP "+response.status+" "+(await response.text()).slice(0,180));
+  return response.json();
+}
+async function refreshStandalone() {
+  try {
+    const info = await bridgeSpotify("GET","status");
+    standaloneEnabled = !!info.enabled;
+    $("standaloneState").textContent = !info.configured ? "Not installed" :
+      !info.enabled ? "Installed / disabled" : info.online ? "Active on ESP32" : "Waiting for hotspot";
+    $("standaloneAction").textContent = (info.last_action || "No command yet")+" / "+(info.last_http||"—");
+    $("standaloneError").textContent = info.error || "";
+    $("active").disabled = standaloneEnabled;
+    if (standaloneEnabled) $("active").checked = false; // Prevent duplicate browser + ESP32 actions.
+  } catch(e) {
+    $("standaloneState").textContent="Not reachable";
+    $("standaloneError").textContent=String(e);
+  }
+}
+bind("standaloneInstall",async()=>{
+  if(!tokens?.refresh_token) throw Error("Authorize Spotify via PKCE first.");
+  const clientId=$("clientId").value.trim();
+  if(!/^[0-9a-f]{32}$/i.test(clientId)) throw Error("Missing Spotify Client ID");
+  await bridgeSpotify("POST","provision",{client_id:clientId,refresh_token:tokens.refresh_token});
+  log("Installed Spotify permission on bridge (secret omitted)");
+  await refreshStandalone();
+});
+bind("standaloneEnable",async()=>{
+  await bridgeSpotify("POST","enable",{enabled:true});
+  await refreshStandalone();
+});
+bind("standaloneDisable",async()=>{
+  await bridgeSpotify("POST","enable",{enabled:false});
+  await refreshStandalone();
+});
+bind("standaloneClear",async()=>{
+  await bridgeSpotify("POST","clear",{});
+  await refreshStandalone();
+});
+
 function fmt(ms){const seconds=Math.floor((ms||0)/1000);return Math.floor(seconds/60)+":"+String(seconds%60).padStart(2,"0");}
 function renderPlayer(x) {
   player=x;duration=x?.item?.duration_ms||0;
@@ -338,7 +403,9 @@ bind("transfer",async()=>{const id=$("devices").value;if(!id)throw Error("Select
 load();
 if(base64url(sha256Ascii("abc"))!=="ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")log("WARNING: SHA-256 self-test FAILED; do not authorize");
 else log("SHA-256 self-test passed; listening for bridge input.");
-document.addEventListener("visibilitychange",()=>{previous=null;if(!document.hidden){pollBridge();if(tokens)refreshPlayer();}});
+document.addEventListener("visibilitychange",()=>{previous=null;if(!document.hidden){pollBridge();if(tokens)refreshPlayer();
+refreshStandalone();
+setInterval(()=>{if(!document.hidden)refreshStandalone();},5000);}});
 setInterval(()=>{if(!document.hidden)pollBridge();},400);pollBridge();
 setInterval(()=>{if(tokens&&!document.hidden)refreshPlayer();},6500);
 if(tokens)refreshPlayer();
