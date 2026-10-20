@@ -24,6 +24,8 @@ class SpotifyBridge {
 public:
     static SpotifyBridge& Instance() { static SpotifyBridge singleton; return singleton; }
 
+    static bool IsHotspotAvailable() { return IsStationConnected(); }
+
     void Start(CarState* state) {
         if (task_) return;
         state_ = state;
@@ -83,11 +85,6 @@ public:
         }
         if (ok) {
             enabled_ = value;
-            // Any action while disabled was not requested for deferred replay.
-            if (state_) {
-                lastNext_ = __atomic_load_n(&state_->MediaNextCount, __ATOMIC_RELAXED);
-                lastPrevious_ = __atomic_load_n(&state_->MediaPreviousCount, __ATOMIC_RELAXED);
-            }
         }
         xSemaphoreGive(mutex_);
         return ok;
@@ -244,7 +241,11 @@ private:
     }
     bool SendAction(const char* action) {
         if (NowMs() < retryAfterMs_) return false;
-        if (access_.empty() || NowMs() >= expiresMs_) if (!RefreshAccess()) return false;
+        bool expired;
+        xSemaphoreTake(mutex_,portMAX_DELAY);
+        expired = access_.empty() || NowMs() >= expiresMs_;
+        xSemaphoreGive(mutex_);
+        if (expired && !RefreshAccess()) return false;
         std::string bearer;
         xSemaphoreTake(mutex_,portMAX_DELAY);
         bearer=access_;
