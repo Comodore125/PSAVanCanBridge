@@ -1,0 +1,45 @@
+name: Publish Spotify OAuth callback on GitHub Pages
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - "docs/index.html"
+      - "docs/spotify-callback.html"
+      - ".github/workflows/deploy-spotify-callback.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages-spotify-callback"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Publish HTTPS callback
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check callback safety and availability
+        shell: bash
+        run: |
+          test -s docs/index.html
+          test -s docs/spotify-callback.html
+          grep -q 'URLSearchParams(location.search)' docs/spotify-callback.html
+          grep -q 'name="referrer" content="no-referrer"' docs/spotify-callback.html
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: Upload only static callback site (not firmware)
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./docs
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
