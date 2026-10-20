@@ -68,6 +68,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <div class="grid">
   <div><label>Bridge controller</label><span id="standaloneState" class="status">Checking…</span></div>
   <div><label>Last action / Spotify HTTP</label><strong id="standaloneAction">—</strong></div>
+<div><label>Actual RD45 audio source (CAN 0x165)</label><span id="radioSourceState" class="status">Unknown</span></div>
 </div>
 <p id="standaloneError" class="muted" role="status"></p>
 <div class="row">
@@ -76,7 +77,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <button id="standaloneDisable">Disable autonomous SEEK</button>
 <button id="standaloneClear" class="danger">Erase bridge Spotify authorization</button>
 </div>
-<p class="muted">Provisioning works only while the bridge is connected to a secure Wi-Fi station/hotspot with Internet access. You must authorize Spotify first using the existing PKCE controls above. Once enabled, the bridge handles steering-stalk presses itself, without web-page polling. It does not change CAN/VAN traffic or audio routing. Credentials are stored locally in ESP32 NVS; do not enable this on an untrusted network.</p>
+<p class="muted">Spotify SEEK is sent only while the RD45 itself reports AUX1/AUX2 in a fresh CAN 0x165 status. The COM2000 remote always retains its original behavior. Provisioning works only while the bridge is connected to a secure Wi-Fi station/hotspot with Internet access. You must authorize Spotify first using the existing PKCE controls above. Once enabled, the bridge handles steering-stalk presses itself, without web-page polling. It does not change CAN/VAN traffic or audio routing. Credentials are stored locally in ESP32 NVS; do not enable this on an untrusted network.</p>
 </section>
 <section class="card">
 <h2>Now playing</h2>
@@ -228,6 +229,12 @@ async function ensureToken() {
   return tokenRefreshing;
 }
 async function spotify(path, method="GET", obj) {
+  // Web and steering controls are Spotify-only in AUX. Read the actual radio
+  // source each time rather than trusting a cached UI state.
+  if (method!=="GET") {
+    const radio=await bridgeSpotify("GET","status");
+    if(!radio.aux_active) throw Error("Spotify controls require RD45 AUX1/AUX2 (fresh CAN 0x165)");
+  }
   const access=await ensureToken();
   const headers={Authorization:"Bearer "+access};
   if(obj!==undefined) headers["Content-Type"]="application/json";
@@ -259,7 +266,10 @@ async function refreshStandalone() {
     const info = await bridgeSpotify("GET","status");
     standaloneEnabled = !!info.enabled;
     $("standaloneState").textContent = info.ready === false ? "Controller unavailable" : !info.configured ? "Not installed" :
-      !info.enabled ? "Installed / disabled" : info.online ? "Active on ESP32" : "Waiting for hotspot";
+      !info.enabled ? "Installed / disabled" : !info.online ? "Waiting for hotspot" :
+      info.aux_active ? "Active on ESP32" : "Armed · waiting for AUX";
+    const sourceNames=["Unknown / stale","Tuner","CD","CD changer","AUX 1","AUX 2","USB","Bluetooth"];
+    $("radioSourceState").textContent=sourceNames[info.radio_source]||sourceNames[0];
     $("standaloneAction").textContent = (info.last_action || "No command yet")+" / "+(info.last_http||"—");
     $("standaloneError").textContent = info.ready === false
       ? "Spotify task is not running; check free heap and serial logs." : (info.error || "");
@@ -268,6 +278,7 @@ async function refreshStandalone() {
     if (standaloneEnabled) $("active").checked = false; // Prevent duplicate browser + ESP32 actions.
   } catch(e) {
     $("standaloneState").textContent="Not reachable";
+    $("radioSourceState").textContent="Unknown / stale";
     $("standaloneError").textContent=String(e);
   }
 }
