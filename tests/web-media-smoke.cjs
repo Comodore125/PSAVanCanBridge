@@ -6,9 +6,9 @@ const vm = require("node:vm");
 const assert = require("node:assert/strict");
 const { webcrypto } = require("node:crypto");
 
-const header = fs.readFileSync(path.join(__dirname, "../src/Helpers/WebServer/MediaPage.hpp"), "utf8");
+const header = fs.readFileSync(path.join(__dirname, "../data/media.html"), "utf8");
 const match = header.match(/<script>([\s\S]*?)<\/script>/);
-assert.ok(match, "Expected an embedded browser script");
+assert.ok(match, "Expected media HTML browser script");
 const code = match[1];
 new vm.Script(code);
 
