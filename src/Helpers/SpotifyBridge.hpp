@@ -306,6 +306,10 @@ private:
             const uint32_t newNext = next - lastNext_, newPrev = prev - lastPrevious_;
             lastNext_ = next;
             lastPrevious_ = prev;
+            // After SNTP has been initialized, idle ticks require no Wi-Fi
+            // driver query or mutex. Preserve 200 ms event latency and never
+            // queue old presses while authorization/network is unavailable.
+            if (sntpStarted && newNext == 0 && newPrev == 0) continue;
             bool enabled, configured, invert;
             xSemaphoreTake(mutex_,portMAX_DELAY);
             enabled = enabled_;
