@@ -31,18 +31,7 @@ public:
         state_ = state;
         mutex_ = xSemaphoreCreateMutex();
         if (!mutex_) return;
-        nvs_handle_t handle = 0;
-        if (nvs_open("spotify_bridge", NVS_READONLY, &handle) == ESP_OK) {
-            size_t length = sizeof(clientId_);
-            if (nvs_get_str(handle, "client_id", clientId_, &length) != ESP_OK) clientId_[0] = '\0';
-            length = sizeof(refresh_);
-            if (nvs_get_str(handle, "refresh", refresh_, &length) != ESP_OK) refresh_[0] = '\0';
-            uint8_t enabled = 0;
-            if (nvs_get_u8(handle, "enabled", &enabled) == ESP_OK) enabled_ = enabled != 0;
-            uint8_t invert = 0;
-            if (nvs_get_u8(handle, "invert", &invert) == ESP_OK) invert_ = invert != 0;
-            CloseNvs(handle);
-        }
+        LoadCredentials();
         // Do not accept stale edge counters after boot or Wi-Fi reconnect.
         lastNext_ = __atomic_load_n(&state_->MediaNextCount, __ATOMIC_RELAXED);
         lastPrevious_ = __atomic_load_n(&state_->MediaPreviousCount, __ATOMIC_RELAXED);
@@ -138,6 +127,26 @@ public:
 private:
     // Prevent a GCC -Wdangling-pointer false positive after nvs_open out-param.
     static __attribute__((noinline)) void CloseNvs(nvs_handle_t value) { nvs_close(value); }
+    // GCC/ESP-IDF sometimes diagnoses NVS opaque integer handles as
+    // a dangling pointer. Keep the NVS load in a separate function and
+    // locally suppress that false-positive (the handle is a value type).
+    __attribute__((noinline)) void LoadCredentials() {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdangling-pointer"
+        nvs_handle_t handle = 0;
+        if (nvs_open("spotify_bridge", NVS_READONLY, &handle) == ESP_OK) {
+            size_t length = sizeof(clientId_);
+            if (nvs_get_str(handle, "client_id", clientId_, &length) != ESP_OK) clientId_[0] = '\0';
+            length = sizeof(refresh_);
+            if (nvs_get_str(handle, "refresh", refresh_, &length) != ESP_OK) refresh_[0] = '\0';
+            uint8_t enabled = 0;
+            if (nvs_get_u8(handle, "enabled", &enabled) == ESP_OK) enabled_ = enabled != 0;
+            uint8_t invert = 0;
+            if (nvs_get_u8(handle, "invert", &invert) == ESP_OK) invert_ = invert != 0;
+            CloseNvs(handle);
+        }
+#pragma GCC diagnostic pop
+    }
     SpotifyBridge() = default;
     SpotifyBridge(const SpotifyBridge&) = delete;
     SpotifyBridge& operator=(const SpotifyBridge&) = delete;
