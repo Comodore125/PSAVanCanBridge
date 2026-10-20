@@ -39,6 +39,6 @@ CONFIG_LWIP_IPV6=n
 # ESP-IDF 6 binary-size optimizations without dropping warning/error logs:
 # Log V2 stores shorter format strings; C++ constexpr cold reduces libstdc++.
 CONFIG_LOG_VERSION_2=y
-CONFIG_COMPILER_CXX_GLIBCXX_CONSTEXPR_COLD_CONSTEXPR=y
+# PlatformIO shell command cannot quote cold-constexpr macros safely; skip.
 # Only impacts esp_err_to_name debug strings (error codes remain available).
 CONFIG_ESP_ERR_TO_NAME_LOOKUP=n
