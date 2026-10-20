@@ -36,7 +36,17 @@ function memoryStorage() {
     removeItem: k => values.delete(k),
   };
 }
-const documents = { hidden: false, getElementById: element, addEventListener() {} };
+const documentListeners = new Map();
+const intervalDelays = [];
+const timeoutDelays = [];
+const documents = {
+  hidden: false,
+  getElementById: element,
+  addEventListener(type, callback) {
+    if (!documentListeners.has(type)) documentListeners.set(type, []);
+    documentListeners.get(type).push(callback);
+  }
+};
 const tokens = memoryStorage();
 const local = memoryStorage();
 let simulated = [
@@ -62,8 +72,8 @@ const context = vm.createContext({
   localStorage: local,
   sessionStorage: tokens,
   fetch: fakeFetch,
-  setInterval: () => 1,
-  setTimeout: () => 1,
+  setInterval: (_fn, ms) => { intervalDelays.push(ms); return intervalDelays.length; },
+  setTimeout: (_fn, ms) => { timeoutDelays.push(ms); return timeoutDelays.length; },
   clearTimeout: () => {},
   crypto: webcrypto,
   AbortController,
@@ -110,6 +120,24 @@ async function main() {
   element("callbackValue").value="https://example.org/callback?code=thecode&state=attacker";
   await assert.rejects(vm.runInContext("finishAuth()",context),/OAuth state mismatch/,"CSRF state protection");
 
-  console.log("PASS: browser syntax, SHA-256 + PKCE, stalk edges, reconnect, no duplicate Spotify forwarding, and OAuth state checks.");
+  // Switching between dashboard and media must never create extra status timers.
+  assert.equal(intervalDelays.filter(ms => ms === 5000).length, 1, "Exactly one status timer after boot");
+  const visibilityCallbacks = documentListeners.get("visibilitychange") || [];
+  assert.equal(visibilityCallbacks.length, 1, "Single visibility listener");
+  for(let i=0;i<5;i++) {
+    documents.hidden = true;
+    visibilityCallbacks[0]();
+    documents.hidden = false;
+    visibilityCallbacks[0]();
+    await settle();
+  }
+  assert.equal(intervalDelays.filter(ms => ms === 5000).length, 1,
+    "Foreground/background switches cannot multiply status requests");
+
+  // When ESP32 handles SEEK autonomously, browser HTTP polling should slow down.
+  await vm.runInContext("pollLoop()", context);
+  await settle();
+  assert.ok(timeoutDelays.includes(2000), "Autonomous media polling uses a 2s interval");
+  console.log("PASS: browser syntax, SHA-256 + PKCE, stalk edges, reconnect, OAuth state, one status timer, low-rate autonomous polling.");
 }
 main().catch(error => { console.error(error); process.exitCode=1; });
