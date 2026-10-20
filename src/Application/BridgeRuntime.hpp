@@ -17,6 +17,7 @@ public:
         PeriodicHook periodic = nullptr;
         DiagnosticHook diagnostic = nullptr;
         MessageHook sourceMessage = nullptr;
+        MessageHook destinationMessage = nullptr; // Passive CAN observation only.
     };
 
 private:
