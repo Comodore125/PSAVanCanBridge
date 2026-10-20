@@ -1,5 +1,6 @@
 #include "Helpers/WebServer/WebServer.hpp"
 #include "Helpers/WebServer/MediaPage.hpp"
+#include "Helpers/SpotifyBridge.hpp"
 #include "esp_ota_ops.h"
 #include "esp_image_format.h"
 #include "mdns.h"
@@ -35,6 +36,10 @@ namespace
         { "/api/time", HTTP_GET, &WebServer::get_time_handler, false },
         { "/media", HTTP_GET, &WebServer::get_media_page_handler, false },
         { "/api/media", HTTP_GET, &WebServer::get_media_status_handler, false },
+        { "/api/spotify/status", HTTP_GET, &WebServer::get_spotify_status_handler, false },
+        { "/api/spotify/provision", HTTP_POST, &WebServer::post_spotify_provision_handler, false },
+        { "/api/spotify/enable", HTTP_POST, &WebServer::post_spotify_enable_handler, false },
+        { "/api/spotify/clear", HTTP_POST, &WebServer::post_spotify_clear_handler, false },
         { "/api/reboot", HTTP_GET, &WebServer::get_reboot_handler, false },
         { "/api/getVin", HTTP_GET, &WebServer::get_vin_handler, false },
         { "/api/config.json", HTTP_GET, &WebServer::get_config_handler, false },
@@ -587,6 +592,69 @@ esp_err_t WebServer::get_media_status_handler(httpd_req_t *req)
     const esp_err_t result = httpd_resp_sendstr(req, response);
     cJSON_free((void*)response);
     return result;
+}
+
+
+esp_err_t WebServer::get_spotify_status_handler(httpd_req_t *req)
+{
+    auto* instance = static_cast<WebServer*>(req->user_ctx);
+    instance->_lastRequestTime = instance->_carState->CurrenTime;
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    const std::string body = SpotifyBridge::Instance().Status();
+    return httpd_resp_send(req, body.data(), body.size());
+}
+
+esp_err_t WebServer::post_spotify_provision_handler(httpd_req_t *req)
+{
+    if (!SpotifyBridge::IsHotspotAvailable()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Configure and connect station Wi-Fi first");
+        return ESP_OK;
+    }
+    cJSON* root = ReceiveJsonBody(req, 4096);
+    if (!root) return ESP_OK;
+    const cJSON* cid = cJSON_GetObjectItemCaseSensitive(root, "client_id");
+    const cJSON* refresh = cJSON_GetObjectItemCaseSensitive(root, "refresh_token");
+    const bool valid = cJSON_IsString(cid) && cJSON_IsString(refresh) &&
+       SpotifyBridge::Instance().Provision(cid->valuestring, refresh->valuestring);
+    cJSON_Delete(root);
+    if (!valid) { httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Spotify credentials"); return ESP_OK; }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"configured\":true,\"enabled\":false}");
+}
+
+esp_err_t WebServer::post_spotify_enable_handler(httpd_req_t *req)
+{
+    if (!SpotifyBridge::IsHotspotAvailable()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Station Wi-Fi required");
+        return ESP_OK;
+    }
+    cJSON* root = ReceiveJsonBody(req, 128);
+    if (!root) return ESP_OK;
+    const cJSON* enabled = cJSON_GetObjectItemCaseSensitive(root, "enabled");
+    const bool valid = cJSON_IsBool(enabled);
+    const bool next = cJSON_IsTrue(enabled);
+    cJSON_Delete(root);
+    if (!valid || !SpotifyBridge::Instance().Enable(next)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Spotify not configured or NVS unavailable");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, next ? "{\"enabled\":true}" : "{\"enabled\":false}");
+}
+
+esp_err_t WebServer::post_spotify_clear_handler(httpd_req_t *req)
+{
+    if (!SpotifyBridge::IsHotspotAvailable()) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Station Wi-Fi required");
+        return ESP_OK;
+    }
+    if (!SpotifyBridge::Instance().Clear()) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Cannot erase Spotify credentials");
+        return ESP_OK;
+    }
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, "{\"configured\":false,\"enabled\":false}");
 }
 
 esp_err_t WebServer::get_time_handler(httpd_req_t *req)
