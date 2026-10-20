@@ -1,5 +1,4 @@
 #include "Helpers/WebServer/WebServer.hpp"
-#include "Helpers/WebServer/MediaPage.hpp"
 #include "Helpers/SpotifyBridge.hpp"
 #include "esp_ota_ops.h"
 #include "esp_image_format.h"
@@ -572,7 +571,10 @@ esp_err_t WebServer::get_media_page_handler(httpd_req_t *req)
     instance->_lastRequestTime = instance->_carState->CurrenTime;
     httpd_resp_set_type(req, "text/html; charset=utf-8");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_sendstr(req, media_page_html);
+    // Serve the same media UI as a gzip-compressed static asset, not a ~25 KB
+    // raw string inside the OTA application image.
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    return httpd_resp_send(req, reinterpret_cast<const char*>(media_html), sizeof(media_html));
 }
 
 esp_err_t WebServer::get_media_status_handler(httpd_req_t *req)
