@@ -31,7 +31,7 @@ public:
         state_ = state;
         mutex_ = xSemaphoreCreateMutex();
         if (!mutex_) return;
-        nvs_handle_t handle;
+        nvs_handle_t handle = 0;
         if (nvs_open("spotify_bridge", NVS_READONLY, &handle) == ESP_OK) {
             size_t length = sizeof(clientId_);
             if (nvs_get_str(handle, "client_id", clientId_, &length) != ESP_OK) clientId_[0] = '\0';
@@ -41,7 +41,7 @@ public:
             if (nvs_get_u8(handle, "enabled", &enabled) == ESP_OK) enabled_ = enabled != 0;
             uint8_t invert = 0;
             if (nvs_get_u8(handle, "invert", &invert) == ESP_OK) invert_ = invert != 0;
-            nvs_close(handle);
+            CloseNvs(handle);
         }
         // Do not accept stale edge counters after boot or Wi-Fi reconnect.
         lastNext_ = __atomic_load_n(&state_->MediaNextCount, __ATOMIC_RELAXED);
@@ -55,7 +55,7 @@ public:
         for (int i=0;i<32;i++)
             if (!std::isxdigit(static_cast<unsigned char>(client[i]))) return false;
         if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
-        nvs_handle_t h;
+        nvs_handle_t h = 0;
         bool ok = nvs_open("spotify_bridge", NVS_READWRITE, &h) == ESP_OK;
         if (ok) {
             ok = nvs_set_str(h, "client_id", client) == ESP_OK &&
@@ -63,7 +63,7 @@ public:
                  nvs_set_u8(h, "enabled", 0) == ESP_OK &&
                  nvs_set_u8(h, "invert", 0) == ESP_OK &&
                  nvs_commit(h) == ESP_OK;
-            nvs_close(h);
+            CloseNvs(h);
         }
         if (ok) {
             snprintf(clientId_, sizeof(clientId_), "%s", client);
@@ -81,13 +81,13 @@ public:
     bool Enable(bool value, bool invert) {
         if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
         if (value && (!clientId_[0] || !refresh_[0])) { xSemaphoreGive(mutex_); return false; }
-        nvs_handle_t h;
+        nvs_handle_t h = 0;
         bool ok = nvs_open("spotify_bridge", NVS_READWRITE, &h) == ESP_OK;
         if (ok) {
             ok = nvs_set_u8(h, "enabled", value ? 1 : 0) == ESP_OK &&
                  nvs_set_u8(h, "invert", invert ? 1 : 0) == ESP_OK &&
                  nvs_commit(h) == ESP_OK;
-            nvs_close(h);
+            CloseNvs(h);
         }
         if (ok) {
             enabled_ = value;
@@ -99,9 +99,9 @@ public:
 
     bool Clear() {
         if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(500)) != pdTRUE) return false;
-        nvs_handle_t h;
+        nvs_handle_t h = 0;
         bool ok = nvs_open("spotify_bridge", NVS_READWRITE, &h) == ESP_OK;
-        if (ok) { ok = nvs_erase_all(h) == ESP_OK && nvs_commit(h) == ESP_OK; nvs_close(h); }
+        if (ok) { ok = nvs_erase_all(h) == ESP_OK && nvs_commit(h) == ESP_OK; CloseNvs(h); }
         if (ok) {
             enabled_ = false;
             memset(clientId_, 0, sizeof(clientId_));
@@ -136,6 +136,8 @@ public:
     }
 
 private:
+    // Prevent a GCC -Wdangling-pointer false positive after nvs_open out-param.
+    static __attribute__((noinline)) void CloseNvs(nvs_handle_t value) { nvs_close(value); }
     SpotifyBridge() = default;
     SpotifyBridge(const SpotifyBridge&) = delete;
     SpotifyBridge& operator=(const SpotifyBridge&) = delete;
@@ -232,11 +234,11 @@ private:
             expiresMs_ = NowMs() + uint64_t(std::max(60, cJSON_IsNumber(expiry) ? expiry->valueint : 3600)-90)*1000;
             error_.clear();
             if (cJSON_IsString(rotated) && rotated->valuestring && strlen(rotated->valuestring)<sizeof(refresh_)) {
-                nvs_handle_t h;
+                nvs_handle_t h = 0;
                 if (nvs_open("spotify_bridge",NVS_READWRITE,&h)==ESP_OK) {
                     if (nvs_set_str(h,"refresh",rotated->valuestring)==ESP_OK && nvs_commit(h)==ESP_OK)
                         snprintf(refresh_,sizeof(refresh_),"%s",rotated->valuestring);
-                    nvs_close(h);
+                    CloseNvs(h);
                 }
             }
         } else {
