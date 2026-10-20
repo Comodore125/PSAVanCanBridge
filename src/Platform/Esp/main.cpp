@@ -44,6 +44,7 @@
 #include "Helpers/CpuConfig.h"
 #include "Helpers/WebServer/WebServer.hpp"
 #include "Helpers/SpotifyBridge.hpp"
+#include "Helpers/RadioAudioSource.hpp"
 #include "Helpers/PSADiag/PsaDiagLib.h"
 #include "Helpers/FuelRefillTracker.hpp"
 #include "Application/BridgeRuntime.hpp"
@@ -233,6 +234,15 @@ void RuntimeDiagnosticHook(void*, uint64_t currentTime, const BusMessage& messag
         message.dataLength,
         const_cast<uint8_t*>(message.data));
     psaDiagLib->Loop(currentTime);
+}
+
+// Observe actual RD45 source; never consume, rewrite or re-route the CAN frame.
+void RuntimeDestinationMessageHook(void*, const BusMessage& message)
+{
+    if (message.protocol != ProtocolType::AEE2004 || message.id != 0x165 ||
+        message.dataLength != 4 || carState == nullptr) return;
+    const uint32_t stamped = RadioAudioSource::EncodeAee2004(message.data, millis());
+    __atomic_store_n(&carState->RadioAudioSourceStamped, stamped, __ATOMIC_RELAXED);
 }
 
 void RuntimeSourceMessageHook(void*, const BusMessage& message)
@@ -426,6 +436,7 @@ extern "C" void app_main(void)
     runtimeHooks.periodic = RuntimePeriodicHook;
     runtimeHooks.diagnostic = RuntimeDiagnosticHook;
     runtimeHooks.sourceMessage = RuntimeSourceMessageHook;
+    runtimeHooks.destinationMessage = RuntimeDestinationMessageHook;
     bridgeRuntime = new BridgeRuntime(
         carState,
         &applicationClock,
