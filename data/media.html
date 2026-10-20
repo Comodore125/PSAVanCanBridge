@@ -400,23 +400,38 @@ bind("transfer",async()=>{const id=$("devices").value;if(!id)throw Error("Select
 load();
 if(base64url(sha256Ascii("abc"))!=="ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0")log("WARNING: SHA-256 self-test FAILED; do not authorize");
 else log("SHA-256 self-test passed; listening for bridge input.");
+// Keep a single in-flight media request and no pending media timer in the
+// background. As in the upstream dashboard, schedule only after fetch settles.
+let mediaPollTimer=null, mediaPollRunning=false;
+function stopMediaPolling() {
+  if(mediaPollTimer!==null) { clearTimeout(mediaPollTimer);mediaPollTimer=null; }
+}
+async function pollLoop() {
+  if(document.hidden||mediaPollRunning)return;
+  mediaPollRunning=true;
+  try { await pollBridge(); }
+  finally {
+    mediaPollRunning=false;
+    if(!document.hidden&&mediaPollTimer===null) {
+      mediaPollTimer=setTimeout(()=>{
+        mediaPollTimer=null;
+        pollLoop();
+      },standaloneEnabled?2000:400);
+    }
+  }
+}
 document.addEventListener("visibilitychange",()=>{
   previous=null;
+  stopMediaPolling();
   if(!document.hidden) {
-    pollBridge();
+    pollLoop();
     if(tokens)refreshPlayer();
     refreshStandalone();
   }
 });
-// Create only one status timer: returning to this tab must not multiply requests.
+// Exactly one status timer; page transitions must never multiply requests.
 setInterval(()=>{if(!document.hidden)refreshStandalone();},5000);
 refreshStandalone();
-// Standalone ESP32 handles SEEK without browser polling. Keep low-rate diagnostics
-// visible, but reduce unnecessary HTTP/JSON work on the bridge.
-async function pollLoop() {
-  if(!document.hidden) await pollBridge();
-  setTimeout(pollLoop,document.hidden ? 2000 : standaloneEnabled ? 2000 : 400);
-}
 pollLoop();
 setInterval(()=>{if(tokens&&!document.hidden)refreshPlayer();},6500);
 if(tokens)refreshPlayer();
