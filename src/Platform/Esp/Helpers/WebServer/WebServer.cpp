@@ -253,7 +253,7 @@ void WebServer::CreateWebServer()
         {
             StartStationMode();
             ESP_ERROR_CHECK(esp_wifi_start());
-            ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(8));
+            ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
 
             const bool ssidFound = ScanForConfiguredStaNetwork();
             const bool connected = ssidFound && ConnectToStationWithTimeout(STA_CONNECT_TIMEOUT_MS);
@@ -275,7 +275,7 @@ void WebServer::CreateWebServer()
     {
         StartApMode();
         ESP_ERROR_CHECK(esp_wifi_start());
-        ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(8));
+        ESP_ERROR_CHECK(esp_wifi_set_max_tx_power(40));
         StartWebServer();
     }
 }
