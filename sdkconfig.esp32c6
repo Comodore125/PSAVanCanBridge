@@ -28,3 +28,10 @@ CONFIG_MBEDTLS_X509_REMOVE_INFO=y
 CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
 # PK write must remain enabled: WPA supplicant calls mbedtls_pk_write_pubkey_der.
 CONFIG_MBEDTLS_PEM_WRITE_C=n
+
+# ESP-IDF 6.1 recommends Newlib nano formatting to reduce OTA flash use.
+# Restriction: unsupported C99/64-bit printf formats; verify on hardware.
+CONFIG_LIBC_NEWLIB_NANO_FORMAT=y
+
+# iPhone hotspot and local bridge API use IPv4. Keep IPv4 and mDNS.
+CONFIG_LWIP_IPV6=n
