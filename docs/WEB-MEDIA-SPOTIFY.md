@@ -7,7 +7,7 @@ message generation, RT scheduling, audio, or the RD45 source.
 ## Runtime
 
 \`COM2000 SEEK -> VAN 0x9C4 -> existing rising-edge counters ->
-SpotifyBridge FreeRTOS task -> authenticated HTTPS Spotify Web API ->
+SpotifyBridge FreeRTOS task (only while RD45 reports AUX) -> Spotify Web API ->
 Spotify Connect on iPhone -> FiiO USB DAC -> RD45 AUX\`.
 
 The task runs at low priority, polls the existing atomic counters every 200 ms,
@@ -17,6 +17,19 @@ remain open and Waze can be foreground on the same phone. Your phone still
 needs an Internet connection and an active Spotify Connect playback device.
 Waze's voice guidance can use the same iPhone audio output; test Waze setting
 "Play sound via: Device default".
+
+The actual RD45 input is passively observed from AEE2004 comfort CAN frame
+`0x165` sent by the radio. Byte 2, bits 4..6, encodes the source; byte 0,
+bit 7, indicates the radio is enabled. Only AUX 1 (4) or AUX 2 (5) permits
+Spotify commands. Radio-off, CD, tuner, USB, Bluetooth, unknown source,
+or status older than 1.5 seconds suppresses Spotify control. The radio's
+original COM2000 controls (VAN 0x9C4 => CAN 0x21F) are never modified.
+
+The read-only `/api/spotify/status` endpoint also reports
+`radio_source` (0 means unknown/stale) and `aux_active`.
+**Hardware validation required:** passively verify that this RD45 firmware
+really transmits 0x165 with these values in FM/CD/USB/AUX. Until then this
+gate is experimental and fails closed if the source isn't detected.
 
 No playlist contents or playback audio are transferred through the bridge.
 This integration provides next/previous commands only; the previous browser
@@ -61,7 +74,7 @@ This is a personal prototype, not production-quality secret storage.
 
 ## Implementation/API
 
-- \`GET /api/spotify/status\`: read-only state.
+- \`GET /api/spotify/status\`: read-only state including actual audio source and AUX gate.
 - \`POST /api/spotify/provision\`: \`{"client_id":"...","refresh_token":"..."}\`.
   Credentials are written to NVS; the feature starts disabled.
 - \`POST /api/spotify/enable\`: \`{"enabled":true}\` or \`false\`.
@@ -81,6 +94,7 @@ in read-only status. TLS verification requires successful SNTP time sync
 ## Validation needed before daily use
 
 - \`node tests/web-media-smoke.cjs\` for the web control logic.
+- \`g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/radio-audio-source-smoke.cpp -o /tmp/radio-test && /tmp/radio-test\` for the pure source decoder.
 - \`pio run -e esp32c6_v16\` using the matching custom PlatformIO/ESP-IDF
   environment. This change has **not** been compiled on the specific firmware
   toolchain or flashed to the bridge in this chat.
