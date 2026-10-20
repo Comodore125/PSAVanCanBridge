@@ -85,6 +85,10 @@ bool BridgeRuntime::ProcessDestinationOnce()
     {
         return true;
     }
+    if (_hooks.destinationMessage != nullptr)
+    {
+        _hooks.destinationMessage(_hooks.context, message);
+    }
     if (_source->CanAcceptMessage(message))
     {
         _source->HandleForwardedMessage(message);
