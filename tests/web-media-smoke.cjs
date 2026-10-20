@@ -114,6 +114,14 @@ async function main() {
   assert.equal(element("active").checked, false, "Stalk forwarding off by default");
   await vm.runInContext("refreshStandalone()",context);
   assert.equal(element("standaloneState").textContent,"Not installed","No stored secrets in test fixture");
+  await vm.runInContext(`(() => { const oldFetch = fetch; fetch = async (url) =>
+    String(url).includes("/api/spotify/status") ?
+    ({ok:true,json:async()=>({ready:false})}) : oldFetch(url);
+    return refreshStandalone().finally(()=>{fetch=oldFetch;}); })()`,context);
+  assert.equal(element("standaloneState").textContent,"Controller unavailable",
+    "Task allocation failure must not look like missing credentials");
+  assert.match(element("standaloneError").textContent,/not running/,
+    "Explain failure instead of silently hiding the task problem");
   // Background controller disables the browser forwarding path to prevent duplicate commands.
   await vm.runInContext(`(() => { const oldFetch = fetch; fetch = async (url) => String(url).includes("/api/spotify/status") ?
     ({ok:true,json:async()=>({configured:true,enabled:true,online:true,last_http:204,last_action:"next",error:""})}) : oldFetch(url);
