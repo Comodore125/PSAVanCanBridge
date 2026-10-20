@@ -7,6 +7,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const cp = require('node:child_process');
 const root = path.resolve(__dirname, '..');
+const pageNames = ['telecoding.html','index.html','dashboard.html','carstate.html','monitor.html','media.html'];
 const source = fs.readFileSync(path.join(root,'data/telecoding.html'), 'utf8');
 const python = process.platform === 'win32' ? 'python' : 'python3';
 const processResult = cp.spawnSync(python, ['scripts/minify_html_js.py','data/telecoding.html'], {
@@ -36,3 +37,20 @@ assert.equal(source.replace(before,'__SCRIPT__'),optimized.replace(after,'__SCRI
 assert.ok(after.length<before.length,'Minified JS should be smaller');
 console.log('PASS telecoding source '+source.length+' bytes -> optimized '+optimized.length+
   ' bytes; both JS scripts parse; public diagnostic entrypoints preserved.');
+for(const filename of pageNames.filter(name=>name!=='telecoding.html')) {
+  const originalHtml=fs.readFileSync(path.join(root,'data',filename),'utf8');
+  const result=cp.spawnSync(python,['scripts/minify_html_js.py','data/'+filename],{
+    cwd:root,encoding:'utf8',maxBuffer:2*1024*1024
+  });
+  assert.equal(result.status,0,filename+': '+result.stderr);
+  const optimizedHtml=result.stdout;
+  const originalScript=body(originalHtml);
+  const optimizedScript=body(optimizedHtml);
+  new vm.Script(originalScript,{filename:filename+':source'});
+  new vm.Script(optimizedScript,{filename:filename+':compressed'});
+  assert.equal(originalHtml.replace(originalScript,'__JS__'),
+    optimizedHtml.replace(optimizedScript,'__JS__'),filename+' HTML preserved');
+  assert.ok(optimizedScript.length<originalScript.length,filename+' minification saved bytes');
+}
+console.log('PASS all '+pageNames.length+' static JS assets parse before/after compression.');
+
