@@ -12,3 +12,19 @@ CONFIG_ULP_COPROC_RESERVE_MEM=12000
 # PlatformIO's ESP-IDF 6.1 LP Core build currently requires Newlib flags that
 # are not provided by its Picolibc integration.
 CONFIG_LIBC_NEWLIB=y
+
+# Spotify needs HTTPS outbound connections only; the built-in web UI is HTTP.
+# Retain root-certificate and hostname verification, ECDHE, and TLS 1.2.
+# Trim TLS server-only and unused protocol features to fit current OTA slots.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+CONFIG_MBEDTLS_FS_IO=n
+CONFIG_MBEDTLS_SSL_RENEGOTIATION=n
+CONFIG_MBEDTLS_SSL_CACHE_C=n
+CONFIG_MBEDTLS_SSL_ALPN=n
+CONFIG_MBEDTLS_SERVER_SSL_SESSION_TICKETS=n
+CONFIG_MBEDTLS_CLIENT_SSL_SESSION_TICKETS=n
+CONFIG_MBEDTLS_X509_REMOVE_INFO=y
+CONFIG_MBEDTLS_X509_CRL_PARSE_C=n
+CONFIG_MBEDTLS_PK_WRITE_C=n
+CONFIG_MBEDTLS_PEM_WRITE_C=n
