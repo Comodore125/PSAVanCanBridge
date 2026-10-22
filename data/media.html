@@ -97,9 +97,21 @@ summary{cursor:pointer}a{color:#91dbff}
 <div class="row"><select id="devices" style="flex:1;min-width:180px"><option value="">Devices not loaded</option></select><button id="loadDevices">Find devices</button><button id="transfer">Transfer playback</button></div>
 <p id="spotifyState" class="muted">Not connected.</p>
 </section>
+<section class="card" id="oemProbeCard">
+<h2>OEM EMF-C metadata test · experimental</h2>
+<p class="muted">Preview Spotify artist/title as RD45 USB-like 0x63 data on CAN 0x2E3. No SOURCE spoofing. This test is OFF by default and never sends automatically. Only transmit with the RD45 on AUX1 on a physically isolated bench with no competing 0x2E3 transmitter.</p>
+<div class="row">
+<button id="oemSample">Preview captured OEM sample</button>
+<button id="oemSpotify">Preview current Spotify track</button>
+</div>
+<p id="oemPreview" class="muted">No test metadata loaded.</p>
+<label><input id="oemIsolated" type="checkbox"> I confirm isolated CAN bench wiring and no other 0x2E3 transmitter</label>
+<div class="row"><button id="oemSend" class="danger">Send one OEM 0x63 test</button></div>
+<p class="muted" id="oemResult" role="status">Idle. Use Destination CAN Incoming/Outgoing monitor for 0x2E3 / 0x15F / 0x165. An ISO-TP flow-control reply does not prove the EMF-C displayed the text.</p>
+</section>
 <details class="card">
 <summary>Diagnostics, test status and limitations</summary>
-<p class="muted">Safari background execution is not guaranteed; when the screen locks, browser-based stalk forwarding can stop. Spotify can return 403, 404, 429 or 204. A SoftAP-only bridge does not supply Internet. This page never injects CAN data or emulates a CD changer; EMF-C display experiments require separately verified CAN captures.</p>
+<p class="muted">Safari background execution is not guaranteed; when the screen locks, browser-based stalk forwarding can stop. Spotify can return 403, 404, 429 or 204. A SoftAP-only bridge does not supply Internet. CAN injection exists only through a deliberate, bench-confirmed one-shot OEM probe; never use on a shared in-car bus.</p>
 <div id="log" role="log" aria-live="polite"></div>
 </details>
 <p class="muted"><a href="/">Bridge configuration</a> · Media additions do not change existing VAN/CAN messages or RD45/AUX operation.</p>
@@ -396,6 +408,41 @@ bind("prev",()=>control("previous"));
 bind("testNext",()=>stalk("next"));
 bind("testPrevious",()=>stalk("previous"));
 bind("refresh",refreshPlayer);
+// Bench-only OEM metadata experiment. Preview uses already fetched Spotify
+// playback data; no autonomous CAN TX, timers or additional Spotify polling.
+let oemArtist="", oemTitle="";
+function setOemPreview(artist,title) {
+  oemArtist=artist||""; oemTitle=title||"";
+  $("oemPreview").textContent=oemArtist&&oemTitle ?
+    oemArtist+" — "+oemTitle : "No active Spotify track to preview.";
+}
+bind("oemSample",()=>setOemPreview("Michael Jackson","Can't Get Outta The Rain"));
+bind("oemSpotify",async()=>{
+  if(!player?.item)await refreshPlayer();
+  const item=player?.item;
+  if(!item)throw Error("No Spotify track: start playback and refresh first");
+  setOemPreview((item.artists||[]).map(a=>a.name).join(", "),item.name);
+});
+bind("oemSend",async()=>{
+  if(!$("oemIsolated").checked)
+    throw Error("Confirm physically isolated CAN bench before OEM transmission");
+  if(!oemArtist||!oemTitle)throw Error("Preview metadata first");
+  if(!windowConfirmOem())throw Error("OEM display test cancelled");
+  const res=await fetch(location.origin+"/api/oem/display-test",{
+    method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",
+    body:JSON.stringify({artist:oemArtist,title:oemTitle,isolated:true})
+  });
+  const result=(await res.text()).slice(0,250);
+  $("oemResult").textContent=result;
+  log("OEM 0x2E3 bench test: "+result);
+  if(!res.ok)throw Error("OEM probe HTTP "+res.status+": "+result);
+});
+function windowConfirmOem() {
+  // A second deliberate confirmation. Not persistent across page reloads.
+  return typeof confirm!=="function" || confirm(
+    "BENCH ONLY: RD45 must stay on AUX1, with no competing CAN 0x2E3 sender. Transmit one ISO-TP test?");
+}
+
 bind("clearLog",()=>{logEntries=[];$("log").textContent="";});
 bind("pause",async()=>{if(!player)throw Error("Refresh an active playback device first");await apiAction(player.is_playing?"/me/player/pause":"/me/player/play","PUT");});
 bind("shuffle",()=>apiAction("/me/player/shuffle?state="+(!player?.shuffle_state),"PUT"));
