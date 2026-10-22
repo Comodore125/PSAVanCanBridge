@@ -136,20 +136,20 @@ private:
                ((m.dataLength>1 ? uint32_t(m.data[1]) : 0)<<8) |
                (m.dataLength>2 ? uint32_t(m.data[2]) : 0);
     }
-    void Trace(uint8_t kind, uint32_t data) {
+    __attribute__((noinline)) void Trace(uint8_t kind, uint32_t data) {
         const uint32_t slot = traceHead_.fetch_add(1) % 12;
         traces_[slot].tag.store((uint32_t(kind)<<24)|(data&0xFFFFFF));
         traces_[slot].at.store(NowMs());
     }
-    bool Aux1() const {
+    __attribute__((noinline)) bool Aux1() const {
         return state_ && RadioAudioSource::FreshSource(
             __atomic_load_n(&state_->RadioAudioSourceStamped,__ATOMIC_RELAXED),
             esp_timer_get_time()/1000ULL)==4;
     }
-    bool Quiet(uint32_t now) const {
+    __attribute__((noinline)) bool Quiet(uint32_t now) const {
         return now>30000U && uint32_t(now-lastPeerMs_.load())>30000U;
     }
-    bool Tx(const OemText63::Frame& frame) {
+    __attribute__((noinline)) bool Tx(const OemText63::Frame& frame) {
         if (!bus_ || !Aux1() || !Quiet(NowMs()) ||
             (!periodic_.load() && periodicTx_)) return false;
         BusMessage m{};
