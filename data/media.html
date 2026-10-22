@@ -439,7 +439,7 @@ bind("oemSend",async()=>{
 });
 function windowConfirmOem() {
   // A second deliberate confirmation. Not persistent across page reloads.
-  return typeof confirm!=="function" || confirm(
+  return typeof confirm==="function" && confirm(
     "BENCH ONLY: RD45 must stay on AUX1, with no competing CAN 0x2E3 sender. Transmit one ISO-TP test?");
 }
 
