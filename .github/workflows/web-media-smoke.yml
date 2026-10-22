@@ -1,7 +1,7 @@
 name: Web media smoke checks
 on:
   push:
-    branches: [feature/3.9.2-wifi-steering-media, feat/3.9.2-spotify-hold-seek]
+    branches: [feature/3.9.2-wifi-steering-media, feat/3.9.2-spotify-hold-seek, feat/3.9.2-spotify-oem-display-probe]
   pull_request:
     paths:
       - "data/media.html"
@@ -14,6 +14,11 @@ on:
       - "src/Helpers/CarState.hpp"
       - "src/Helpers/SpotifySeekGesture.hpp"
       - "src/Helpers/SpotifyBridge.hpp"
+      - "src/Helpers/OemText63.hpp"
+      - "src/Helpers/OemDisplayProbe.hpp"
+      - "tests/oem-text-63-smoke.cpp"
+      - "scripts/check_ota_size.py"
+      - "partitions.csv"
       - "src/Protocol/AEE2001/Handlers/BSI/MessageHandler_9C4.hpp"
       - "tests/spotify-seek-gesture-smoke.cpp"
       - "tests/web-media-smoke.cjs"
@@ -38,6 +43,8 @@ jobs:
           /tmp/radio-source-test
           g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/spotify-seek-gesture-smoke.cpp -o /tmp/spotify-gesture-test
           /tmp/spotify-gesture-test
+          g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/oem-text-63-smoke.cpp -o /tmp/oem-text-test
+          /tmp/oem-text-test
       - name: Check media HTML extraction
         run: |
           test -s data/media.html
@@ -59,10 +66,12 @@ jobs:
       - name: Verify full Newlib formatting is enabled
         run: |
           grep -E "^(# CONFIG_LIBC_NEWLIB_NANO_FORMAT is not set|CONFIG_LIBC_NEWLIB_NANO_FORMAT=n)$" .pio/build/esp32c6_v16/sdkconfig
+      - name: Verify actual OTA binary fits both configured partitions
+        run: python scripts/check_ota_size.py partitions.csv .pio/build/esp32c6_v16/firmware.bin
       - name: Upload experimental firmware for bench validation
         uses: actions/upload-artifact@v4
         with:
-          name: experimental-392-media-esp32c6-v16
+          name: experimental-392-oem-probe-esp32c6-v16
           path: .pio/build/esp32c6_v16/firmware.bin
           if-no-files-found: error
           retention-days: 7
