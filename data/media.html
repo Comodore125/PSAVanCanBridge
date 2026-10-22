@@ -449,14 +449,14 @@ async function oemPost(url,payload) {
 }
 bind("oemSend",async()=>{
   oemConfirm("Send one");
-  await oemPost("display-test",{artist:oemArtist,title:oemTitle,confirmed:true});
+  await oemPost("display-test",{mode:1,artist:oemArtist,title:oemTitle,confirmed:true});
 });
 bind("oemRepeat",async()=>{
   oemConfirm("Start at most 8 repeated");
-  await oemPost("repeat",{enabled:true,artist:oemArtist,title:oemTitle,
+  await oemPost("display-test",{mode:2,artist:oemArtist,title:oemTitle,
     interval_ms:Number($("oemInterval").value),confirmed:true});
 });
-bind("oemStop",()=>oemPost("repeat",{enabled:false}));
+bind("oemStop",()=>oemPost("display-test",{mode:0}));
 async function refreshOemStatus() {
   try {
     const r=await fetch(location.origin+"/api/oem/status",{cache:"no-store"});
