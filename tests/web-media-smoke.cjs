@@ -74,8 +74,7 @@ async function fakeFetch(url, opts={}) {
     return {ok:true,json:async()=>({repeat:false,remaining:0,last_code:0,
       tx_frames:0,rx_fc:0,rx_2e3:0,trace:[[5000,0x05000004]]})};
   }
-  if (String(url).includes("/api/oem/repeat") ||
-      String(url).includes("/api/oem/display-test")) {
+  if (String(url).includes("/api/oem/display-test")) {
     return {ok:true,status:200,text:async()=>"acknowledged"};
   }
   if (String(url).includes("/api/spotify/status")) {
@@ -114,7 +113,7 @@ async function main() {
   await settle(); // Initial read starts automatically
   assert.match(element("oemTrace").textContent,/SOURCE 165/,
     "OEM status must not consume media event counters");
-  await vm.runInContext('oemPost("repeat",{enabled:false})',context);
+  await vm.runInContext('oemPost("display-test",{mode:0})',context);
   assert.equal(element("oemResult").textContent.startsWith("Stopped"),true,
     "Repeat stop uses independent OEM endpoint");
   await assert.rejects(
