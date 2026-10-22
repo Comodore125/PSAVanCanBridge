@@ -21,6 +21,7 @@
 #include "Helpers/CarState.hpp"
 #include "Helpers/RadioAudioSource.hpp"
 #include "Helpers/SpotifySeekGesture.hpp"
+#include "Helpers/OemDisplayProbe.hpp"
 
 class SpotifyBridge {
 public:
@@ -434,6 +435,7 @@ private:
                     SendAction(forward ? "next" : "previous");
                 }
             }
+            OemDisplayProbe::Instance().Tick();
         }
     }
 };
