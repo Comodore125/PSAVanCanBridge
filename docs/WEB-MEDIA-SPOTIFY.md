@@ -139,9 +139,11 @@ Modes:
   30 seconds, at most **eight sends**, then automatically stop.
 - **Stop:** disable future repeated transmissions immediately. A
   transaction already on the bus may finish/abort on its next frame.
-- **Status:** a bounded 12-entry, in-RAM timestamped ring of TX `0x2E3`,
-  RX `0x15F`, RX `0x2E3`, SOURCE transitions and completion codes,
-  together with counters, last FC and remaining repetitions.
+- **Status:** fixed-size, allocation-free counters for TX `0x2E3`,
+  RX `0x15F`, competing RX `0x2E3`, SOURCE, last FC,
+  completion code and remaining repetitions. The original Destination
+  CAN monitor provides the full timestamped frame sequence; there is
+  no duplicate ring buffer in MCU RAM.
 
 The repeated mode uses the existing 200ms low-priority Spotify task, not
 a new RTOS task or CAN/VAN scheduler operation. No additional Spotify
