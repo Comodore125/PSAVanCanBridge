@@ -82,6 +82,10 @@ private:
         if (!Aux1()) return "RD45 must report fresh AUX1 (0x165)";
         if (!Quiet(NowMs())) return "CAN 0x2E3 is busy or quiet-time not met";
         flowControl_.store(0, std::memory_order_release);
+        if (payload.size <= 7) {
+            if (!Tx(OemText63::SingleFrame(payload))) return "CAN single frame failed";
+            return "ISO-TP single frame sent; check physical display";
+        }
         if (!Tx(OemText63::FirstFrame(payload))) return "CAN first frame failed";
 
         // Wait for physical display FC 0x15F, not a fabricated software ACK.
