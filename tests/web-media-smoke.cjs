@@ -71,8 +71,10 @@ let simulatedStandalone = {ready:true,configured:false,enabled:false,online:fals
   last_http:0,last_action:"",error:""};
 async function fakeFetch(url, opts={}) {
   if (String(url).includes("/api/oem/status")) {
-    return {ok:true,json:async()=>({repeat:false,remaining:0,last_code:0,
-      tx_frames:0,rx_fc:0,rx_2e3:0,trace:[[5000,0x05000004]]})};
+    const payload=new Uint32Array(36);
+    payload[0]=0x4F454D31;payload[11]=1;
+    payload[12]=5000;payload[13]=0x05000004;
+    return {ok:true,arrayBuffer:async()=>payload.buffer};
   }
   if (String(url).includes("/api/oem/display-test")) {
     return {ok:true,status:200,text:async()=>"acknowledged"};
