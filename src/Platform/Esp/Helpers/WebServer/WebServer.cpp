@@ -670,11 +670,11 @@ esp_err_t WebServer::post_spotify_clear_handler(httpd_req_t *req)
 // Deliberate, nonpersistent CAN metadata proof of concept.
 esp_err_t WebServer::get_oem_status_handler(httpd_req_t *req)
 {
-    char json[1024]{};
-    OemDisplayProbe::Instance().Status(json,sizeof(json));
-    httpd_resp_set_type(req,"application/json");
+    uint32_t words[OemDisplayProbe::TelemetryWords]{};
+    OemDisplayProbe::Instance().Snapshot(words);
+    httpd_resp_set_type(req,"application/octet-stream");
     httpd_resp_set_hdr(req,"Cache-Control","no-store");
-    return httpd_resp_sendstr(req,json);
+    return httpd_resp_send(req,reinterpret_cast<const char*>(words),sizeof(words));
 }
 
 esp_err_t WebServer::post_oem_display_probe_handler(httpd_req_t *req)
