@@ -42,6 +42,8 @@ namespace
         { "/api/spotify/enable", HTTP_POST, &WebServer::post_spotify_enable_handler, false },
         { "/api/spotify/clear", HTTP_POST, &WebServer::post_spotify_clear_handler, false },
         { "/api/oem/display-test", HTTP_POST, &WebServer::post_oem_display_probe_handler, false },
+        { "/api/oem/repeat", HTTP_POST, &WebServer::post_oem_repeat_handler, false },
+        { "/api/oem/status", HTTP_GET, &WebServer::get_oem_status_handler, false },
         { "/api/reboot", HTTP_GET, &WebServer::get_reboot_handler, false },
         { "/api/getVin", HTTP_GET, &WebServer::get_vin_handler, false },
         { "/api/config.json", HTTP_GET, &WebServer::get_config_handler, false },
@@ -666,34 +668,66 @@ esp_err_t WebServer::post_spotify_clear_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"configured\":false,\"enabled\":false}");
 }
 
-// Only a deliberate bench-confirmed POST can originate OEM CAN metadata.
-// This never stores an enable flag and cannot auto-transmit on reboot.
+// Deliberate, nonpersistent CAN metadata proof of concept.
+esp_err_t WebServer::get_oem_status_handler(httpd_req_t *req)
+{
+    char json[1024]{};
+    OemDisplayProbe::Instance().Status(json,sizeof(json));
+    httpd_resp_set_type(req,"application/json");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,json);
+}
+
+esp_err_t WebServer::post_oem_repeat_handler(httpd_req_t *req)
+{
+    cJSON* root=ReceiveJsonBody(req,256);
+    if(!root) return ESP_OK;
+    const cJSON* enabled=cJSON_GetObjectItemCaseSensitive(root,"enabled");
+    if(cJSON_IsFalse(enabled)) {
+        OemDisplayProbe::Instance().Stop();
+        cJSON_Delete(root);
+        return httpd_resp_sendstr(req,"stopped");
+    }
+    const cJSON* artist=cJSON_GetObjectItemCaseSensitive(root,"artist");
+    const cJSON* title=cJSON_GetObjectItemCaseSensitive(root,"title");
+    const cJSON* interval=cJSON_GetObjectItemCaseSensitive(root,"interval_ms");
+    const cJSON* confirmed=cJSON_GetObjectItemCaseSensitive(root,"confirmed");
+    const bool valid=cJSON_IsTrue(enabled) && cJSON_IsTrue(confirmed) &&
+        cJSON_IsString(artist) && cJSON_IsString(title) &&
+        artist->valuestring && title->valuestring &&
+        strlen(artist->valuestring)<=64 && strlen(title->valuestring)<=80 &&
+        cJSON_IsNumber(interval);
+    const bool ok=valid && OemDisplayProbe::Instance().StartRepeat(
+        artist->valuestring,title->valuestring,
+        static_cast<uint32_t>(interval->valuedouble),true);
+    cJSON_Delete(root);
+    if(!ok)return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
+          "repeat refused: AUX1/quiet/confirmation/interval");
+    return httpd_resp_sendstr(req,"repeat armed: maximum 8 transactions");
+}
+
 esp_err_t WebServer::post_oem_display_probe_handler(httpd_req_t *req)
 {
-    if (!SpotifyBridge::IsHotspotAvailable()) {
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Private STA Wi-Fi required");
-    }
-    cJSON* root = ReceiveJsonBody(req, 256);
-    if (!root) return ESP_OK;
-    const cJSON* artist = cJSON_GetObjectItemCaseSensitive(root, "artist");
-    const cJSON* title = cJSON_GetObjectItemCaseSensitive(root, "title");
-    const cJSON* isolated = cJSON_GetObjectItemCaseSensitive(root, "isolated");
-    const bool valid = cJSON_IsString(artist) && cJSON_IsString(title) &&
-                       artist->valuestring && title->valuestring &&
-                       strlen(artist->valuestring) <= 64 &&
-                       strlen(title->valuestring) <= 80 &&
-                       cJSON_IsTrue(isolated);
-    if (!valid) {
+    cJSON* root=ReceiveJsonBody(req,256);
+    if(!root) return ESP_OK;
+    const cJSON* artist=cJSON_GetObjectItemCaseSensitive(root,"artist");
+    const cJSON* title=cJSON_GetObjectItemCaseSensitive(root,"title");
+    const cJSON* confirmed=cJSON_GetObjectItemCaseSensitive(root,"confirmed");
+    const bool valid=cJSON_IsTrue(confirmed) &&
+        cJSON_IsString(artist) && cJSON_IsString(title) &&
+        artist->valuestring && title->valuestring &&
+        strlen(artist->valuestring)<=64 && strlen(title->valuestring)<=80;
+    if(!valid) {
         cJSON_Delete(root);
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                   "Artist/title and explicit isolated bench confirmation required");
+        return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,
+                                   "explicit confirmation and artist/title required");
     }
-    const char* result = OemDisplayProbe::Instance().Send(
-        artist->valuestring, title->valuestring, true);
+    const char* result=OemDisplayProbe::Instance().Send(
+        artist->valuestring,title->valuestring,true);
     cJSON_Delete(root);
-    httpd_resp_set_type(req, "text/plain; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_sendstr(req, result);
+    httpd_resp_set_type(req,"text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_sendstr(req,result);
 }
 
 esp_err_t WebServer::get_time_handler(httpd_req_t *req)
