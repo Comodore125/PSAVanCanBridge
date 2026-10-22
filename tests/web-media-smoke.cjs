@@ -70,6 +70,14 @@ let offline = false;
 let simulatedStandalone = {ready:true,configured:false,enabled:false,online:false,
   last_http:0,last_action:"",error:""};
 async function fakeFetch(url, opts={}) {
+  if (String(url).includes("/api/oem/status")) {
+    return {ok:true,json:async()=>({repeat:false,remaining:0,last_code:0,
+      tx_frames:0,rx_fc:0,rx_2e3:0,trace:[[5000,0x05000004]]})};
+  }
+  if (String(url).includes("/api/oem/repeat") ||
+      String(url).includes("/api/oem/display-test")) {
+    return {ok:true,status:200,text:async()=>"acknowledged"};
+  }
   if (String(url).includes("/api/spotify/status")) {
     return {ok:true, json:async()=>({...simulatedStandalone})};
   }
@@ -104,6 +112,15 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 async function main() {
   vm.runInContext(code, context);
   await settle(); // Initial read starts automatically
+  assert.match(element("oemTrace").textContent,/SOURCE 165/,
+    "OEM status must not consume media event counters");
+  await vm.runInContext('oemPost("repeat",{enabled:false})',context);
+  assert.equal(element("oemResult").textContent.startsWith("Stopped"),true,
+    "Repeat stop uses independent OEM endpoint");
+  await assert.rejects(
+    Promise.resolve().then(()=>vm.runInContext('oemConfirm("Send")',context)),
+    /Confirm the shared-bus risk/,
+    "Unacknowledged OEM transmit remains blocked");
   assert.equal(element("counts").textContent, "0 / 0", "Initial counters");
   assert.equal(vm.runInContext("base64url(sha256Ascii('abc'))", context), "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0", "SHA-256 test vector");
   assert.equal(vm.runInContext("base64url(sha256Ascii('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'))",context), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "RFC 7636 PKCE test vector");
