@@ -19,6 +19,9 @@ int main() {
         pos+=f.length-1;
     }
     assert(pos==p.size);
+    assert(OemText63::Encode("a","b",p) && p.size==5);
+    const auto sf=OemText63::SingleFrame(p);
+    assert(sf.length==6 && sf.data[0]==5 && sf.data[1]==0x63);
     assert(!OemText63::Encode("","title",p));
     char longname[150]; memset(longname,'A',149);longname[149]=0;
     assert(OemText63::Encode(longname,longname,p) && p.size<=OemText63::Capacity);
