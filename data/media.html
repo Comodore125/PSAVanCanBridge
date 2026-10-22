@@ -111,7 +111,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <select id="oemInterval" aria-label="Repeat interval"><option value="10000">Every 10 seconds</option><option value="5000">Every 5 seconds</option><option value="30000">Every 30 seconds</option></select>
 <button id="oemRepeat">Start repeat (max 8)</button><button id="oemStop">Stop repeat</button>
 </div>
-<div><label>CAN diagnostic trace (last 12 events)</label><pre id="oemTrace">No capture yet</pre></div>
+<div><label>CAN transport diagnostics</label><pre id="oemTrace">No capture yet</pre></div>
 <p class="muted" id="oemResult" role="status">Idle. RX/TX events are sampled in RAM; RX 0x15F is transport flow control, not proof of EMF-C rendering.</p>
 </section>
 <details class="card">
@@ -471,26 +471,24 @@ async function refreshOemStatus() {
     const r=await fetch(location.origin+"/api/oem/status",{cache:"no-store"});
     if(!r.ok)throw Error("HTTP "+r.status);
     const buffer=await r.arrayBuffer();
-    if(buffer.byteLength!==144)throw Error("Bad OEM telemetry size");
+    if(buffer.byteLength!==48)throw Error("Bad OEM telemetry size");
     const view=new DataView(buffer),at=i=>view.getUint32(i*4,true);
     if(at(0)!==0x4F454D31)throw Error("Unknown OEM telemetry version");
     const d={repeat:!!(at(1)&1),remaining:at(3),last_code:at(4),
       last_fc:at(5),tx_frames:at(6),rx_fc:at(7),rx_2e3:at(8),
-      trace:Array.from({length:Math.min(at(11),12)},
-        (_,i)=>[at(12+i*2),at(13+i*2)])};
+      source:at(9),since_peer_ms:at(10),awaiting_fc:!!at(11)};
     const reasons=["idle","complete: check physical EMF-C","single frame sent",
       "AUX1 status missing","0x2E3 active / quiet time","TX failed",
       "FC timeout","unsupported FC","","invalid metadata","CAN unavailable"];
     $("oemResult").textContent=(d.repeat?"Repeating · ":"Stopped · ")+
       "remaining "+d.remaining+" · "+(reasons[d.last_code]||"unknown")+
       " · TX "+d.tx_frames+" · FC "+d.rx_fc+" · peer 0x2E3 "+d.rx_2e3;
-    const codeNames=["","", "TX 2E3","RX 15F","RX 2E3","SOURCE 165",
-      "ARM REPEAT","STOP REPEAT","RESULT"];
-    $("oemTrace").textContent=(d.trace||[]).map(([ms,packed])=>{
-      const type=packed>>>24, payload=packed&0xFFFFFF;
-      return (ms/1000).toFixed(3)+"s "+(codeNames[type]||"EV "+type)+
-        " 0x"+payload.toString(16).toUpperCase().padStart(6,"0");
-    }).join("\n")||"No OEM CAN events captured yet";
+    const sources=["Unknown","FM","CD","CD changer","AUX1","AUX2","USB","Streaming"];
+    $("oemTrace").textContent="SOURCE: "+(sources[d.source]||"Unknown")+
+      " · last FC: 0x"+d.last_fc.toString(16).toUpperCase().padStart(6,"0")+
+      " · last incoming 2E3: "+(d.since_peer_ms/1000).toFixed(1)+"s"+
+      (d.awaiting_fc?" · waiting for 15F":"")+
+      "\\nFull timestamped frames: Destination CAN monitor (Incoming / Outgoing).";
   }catch(e){$("oemTrace").textContent="OEM diagnostics unavailable: "+e;}
 }
 bind("clearLog",()=>{logEntries=[];$("log").textContent="";});
