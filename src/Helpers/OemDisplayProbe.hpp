@@ -48,7 +48,7 @@ public:
             ? Transmit(payload) : 9;
         Finish(result);
         busy_.store(false);
-        return Describe(result);
+        return (result==1 || result==2) ? "sent; check display" : "failed; inspect OEM diagnostics";
     }
 
     bool StartRepeat(const char* artist, const char* title, uint32_t interval,
@@ -209,17 +209,5 @@ private:
         return 1;
     }
     void Finish(uint8_t code) {lastCode_.store(code);Trace(8,code);}
-    static const char* Describe(uint8_t code) {
-        switch(code) {
-            case 1: return "ISO-TP complete; inspect EMF-C";
-            case 2: return "ISO-TP single frame sent; inspect EMF-C";
-            case 3: return "no fresh AUX1 (0x165)";
-            case 4: return "0x2E3 observed or 30s quiet time not met";
-            case 5: return "CAN TX blocked or failed";
-            case 6: return "no physical 0x15F flow control";
-            case 7: return "unsupported 0x15F flow control";
-            case 9: return "invalid artist/title";
-            default: return "CAN transport unavailable";
-        }
-    }
+
 };
