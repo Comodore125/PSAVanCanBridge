@@ -35,6 +35,14 @@ namespace OemText63 {
     }
 
     struct Frame { uint8_t data[8]{}; uint8_t length = 0; };
+    inline Frame SingleFrame(const Payload& payload) {
+        Frame frame{};
+        if (payload.size > 7) return frame;
+        frame.data[0] = payload.size;
+        for (uint8_t i=0; i<payload.size; ++i) frame.data[i+1] = payload.data[i];
+        frame.length = payload.size + 1;
+        return frame;
+    }
     inline Frame FirstFrame(const Payload& payload) {
         Frame frame{};
         frame.data[0] = static_cast<uint8_t>(0x10 | (payload.size >> 8));
