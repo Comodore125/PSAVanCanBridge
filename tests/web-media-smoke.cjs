@@ -105,6 +105,7 @@ const context = vm.createContext({
   AbortController,
   URL,
   URLSearchParams,
+  TextEncoder,
   btoa,
   console
 });
