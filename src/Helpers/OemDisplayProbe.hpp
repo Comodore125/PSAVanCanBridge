@@ -94,33 +94,26 @@ public:
         busy_.store(false);
     }
 
-    void Status(char* out, size_t capacity) const {
-        const uint32_t now = NowMs();
-        const uint32_t peer = lastPeerMs_.load();
-        int used = snprintf(out,capacity,
-            "{\"repeat\":%s,\"busy\":%s,\"interval_ms\":%lu,"
-            "\"remaining\":%u,\"last_code\":%u,\"last_fc\":%lu,"
-            "\"tx_frames\":%lu,\"rx_fc\":%lu,\"rx_2e3\":%lu,"
-            "\"source\":%u,\"since_peer_ms\":%lu,\"trace\":[",
-            periodic_.load()?"true":"false",busy_.load()?"true":"false",
-            static_cast<unsigned long>(intervalMs_),unsigned(remaining_),
-            unsigned(lastCode_.load()),static_cast<unsigned long>(lastFc_.load()),
-            static_cast<unsigned long>(txCount_.load()),
-            static_cast<unsigned long>(fcCount_.load()),
-            static_cast<unsigned long>(peerCount_.load()),
-            unsigned(lastSource_.load()),static_cast<unsigned long>(now-peer));
-        if (used < 0 || static_cast<size_t>(used) >= capacity) return;
-        const uint32_t head = traceHead_.load();
-        const uint32_t count = head < 12 ? head : 12;
-        for(uint32_t j=0; j<count; ++j) {
-            const uint32_t i = (head - count + j) % 12;
-            const int n = snprintf(out+used,capacity-used,"%s[%lu,%lu]",
-                j?",":"",static_cast<unsigned long>(traces_[i].at.load()),
-                static_cast<unsigned long>(traces_[i].tag.load()));
-            if (n<0 || static_cast<size_t>(n)>=capacity-used) return;
-            used+=n;
+    // Fixed-size little-endian telemetry (144 B). Avoid JSON allocations and
+    // snprintf formatting on ESP32: /media decodes this via DataView.
+    static constexpr size_t TelemetryWords = 36;
+    void Snapshot(uint32_t* out) const {
+        const uint32_t now=NowMs();
+        out[0]=0x4F454D31U; // OEM1 protocol version
+        out[1]=(periodic_.load()?1U:0U)|(busy_.load()?2U:0U);
+        out[2]=intervalMs_.load(); out[3]=remaining_.load();
+        out[4]=lastCode_.load(); out[5]=lastFc_.load();
+        out[6]=txCount_.load(); out[7]=fcCount_.load();
+        out[8]=peerCount_.load(); out[9]=lastSource_.load();
+        out[10]=now-lastPeerMs_.load();
+        const uint32_t head=traceHead_.load();
+        const uint32_t count=head<12?head:12;
+        out[11]=count;
+        for(uint32_t i=0;i<12;++i) {
+            const uint32_t slot=(head-count+i)%12;
+            out[12+i*2]=i<count?traces_[slot].at.load():0;
+            out[13+i*2]=i<count?traces_[slot].tag.load():0;
         }
-        snprintf(out+used,capacity-used,"]}");
     }
 
 private:
