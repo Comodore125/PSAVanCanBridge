@@ -20,6 +20,7 @@
 #include "freertos/semphr.h"
 #include "Helpers/CarState.hpp"
 #include "Helpers/RadioAudioSource.hpp"
+#include "Helpers/SpotifySeekGesture.hpp"
 
 class SpotifyBridge {
 public:
@@ -34,8 +35,6 @@ public:
         if (!mutex_) return;
         LoadCredentials();
         // Do not accept stale edge counters after boot or Wi-Fi reconnect.
-        lastNext_ = __atomic_load_n(&state_->MediaNextCount, __ATOMIC_RELAXED);
-        lastPrevious_ = __atomic_load_n(&state_->MediaPreviousCount, __ATOMIC_RELAXED);
         if (xTaskCreate(&SpotifyBridge::TaskEntry, "SpotifyCtl", 10240, this, 1, &task_) != pdPASS) {
             // Insufficient RAM: fail closed instead of reporting an enabled
             // controller that can never consume seek events.
@@ -175,7 +174,6 @@ private:
     std::string error_;
     std::string lastAction_;
     int lastHttp_ = 0;
-    uint32_t lastNext_ = 0, lastPrevious_ = 0;
 
     struct Response {
         std::string body;
@@ -219,7 +217,8 @@ private:
         config.disable_auto_redirect = true;
         esp_http_client_handle_t h = esp_http_client_init(&config);
         if (!h) return result;
-        esp_http_client_set_method(h, strcmp(method,"POST")==0 ? HTTP_METHOD_POST : HTTP_METHOD_GET);
+        esp_http_client_set_method(h, strcmp(method,"POST")==0 ? HTTP_METHOD_POST :
+            strcmp(method,"PUT")==0 ? HTTP_METHOD_PUT : HTTP_METHOD_GET);
         if (contentType) esp_http_client_set_header(h, "Content-Type", contentType);
         std::string authorization;
         if (bearer) {
@@ -311,6 +310,93 @@ private:
         xSemaphoreGive(mutex_);
         return ok;
     }
+    // Release-driven seek: one playback-state GET followed by one position PUT.
+    // Neither call is made from VAN/CAN receive handlers. Never transmit
+    // Spotify commands unless fresh RD45 0x165 explicitly reports AUX.
+    bool SendSeek(bool forward, uint32_t heldMs) {
+        if (!AuxSelected() || NowMs() < retryAfterMs_) return false;
+        bool expired;
+        xSemaphoreTake(mutex_, portMAX_DELAY);
+        expired = access_.empty() || NowMs() >= expiresMs_;
+        xSemaphoreGive(mutex_);
+        if (expired && !RefreshAccess()) return false;
+        if (!AuxSelected()) return false;
+
+        std::string bearer;
+        xSemaphoreTake(mutex_, portMAX_DELAY);
+        bearer = access_;
+        xSemaphoreGive(mutex_);
+        Response playback = Request("https://api.spotify.com/v1/me/player",
+                                    "GET", "", nullptr, bearer.c_str());
+        if (playback.code == 401) {
+            xSemaphoreTake(mutex_, portMAX_DELAY);
+            access_.clear();
+            xSemaphoreGive(mutex_);
+            if (RefreshAccess() && AuxSelected()) {
+                xSemaphoreTake(mutex_, portMAX_DELAY);
+                bearer = access_;
+                xSemaphoreGive(mutex_);
+                playback = Request("https://api.spotify.com/v1/me/player",
+                                   "GET", "", nullptr, bearer.c_str());
+            }
+        }
+
+        cJSON* root = playback.code == 200 ? cJSON_Parse(playback.body.c_str()) : nullptr;
+        const cJSON* progress = root ? cJSON_GetObjectItemCaseSensitive(root, "progress_ms") : nullptr;
+        const cJSON* item = root ? cJSON_GetObjectItemCaseSensitive(root, "item") : nullptr;
+        const cJSON* duration = item ? cJSON_GetObjectItemCaseSensitive(item, "duration_ms") : nullptr;
+        const bool valid = cJSON_IsNumber(progress) && cJSON_IsNumber(duration) &&
+                           progress->valuedouble >= 0 && duration->valuedouble > 0 &&
+                           progress->valuedouble < 2147483647.0 && duration->valuedouble < 2147483647.0;
+        int64_t target = 0;
+        if (valid) {
+            const int64_t delta = std::min<uint32_t>(
+                SpotifySeekGesture::MaxSeekDeltaMs,
+                heldMs * SpotifySeekGesture::MsPerHeldMs);
+            target = int64_t(progress->valuedouble) + (forward ? delta : -delta);
+            target = std::max<int64_t>(0, std::min<int64_t>(target, int64_t(duration->valuedouble)-1));
+        }
+        if (root) cJSON_Delete(root);
+        if (!valid) {
+            xSemaphoreTake(mutex_, portMAX_DELAY);
+            lastHttp_ = playback.code;
+            error_ = playback.code == 204 ? "Spotify has no active playback device" :
+                playback.code == 200 ? "Spotify seek requires track position and duration" :
+                "Spotify playback lookup failed (HTTP " + std::to_string(playback.code) + ")";
+            retryAfterMs_ = NowMs() +
+                ((playback.code == 429) ? uint64_t(std::max(3, playback.retrySeconds))*1000 : 5000);
+            xSemaphoreGive(mutex_);
+            return false;
+        }
+        if (!AuxSelected()) return false; // The user may have switched to FM during GET.
+        const std::string url = "https://api.spotify.com/v1/me/player/seek?position_ms=" +
+                                std::to_string(target);
+        Response result = Request(url.c_str(), "PUT", "", nullptr, bearer.c_str());
+        if (result.code == 401) {
+            xSemaphoreTake(mutex_, portMAX_DELAY);
+            access_.clear();
+            xSemaphoreGive(mutex_);
+            if (RefreshAccess() && AuxSelected()) {
+                xSemaphoreTake(mutex_, portMAX_DELAY);
+                bearer = access_;
+                xSemaphoreGive(mutex_);
+                result = Request(url.c_str(), "PUT", "", nullptr, bearer.c_str());
+            }
+        }
+        const bool ok = result.code == 204 || result.code == 200 || result.code == 202;
+        xSemaphoreTake(mutex_, portMAX_DELAY);
+        lastHttp_ = result.code;
+        if (ok) {
+            lastAction_ = forward ? "seek_forward" : "seek_backward";
+            error_.clear();
+        } else {
+            error_ = "Spotify seek failed (HTTP " + std::to_string(result.code) + ")";
+            retryAfterMs_ = NowMs() +
+                ((result.code == 429) ? uint64_t(std::max(3, result.retrySeconds))*1000 : 5000);
+        }
+        xSemaphoreGive(mutex_);
+        return ok;
+    }
     static void TaskEntry(void* parameter) {
         static_cast<SpotifyBridge*>(parameter)->Loop();
     }
@@ -319,33 +405,35 @@ private:
         for (;;) {
             vTaskDelay(pdMS_TO_TICKS(200));
             if (!state_ || !mutex_) continue;
-            const uint32_t next = __atomic_load_n(&state_->MediaNextCount, __ATOMIC_RELAXED);
-            const uint32_t prev = __atomic_load_n(&state_->MediaPreviousCount, __ATOMIC_RELAXED);
-            const uint32_t newNext = next - lastNext_, newPrev = prev - lastPrevious_;
-            lastNext_ = next;
-            lastPrevious_ = prev;
-            // After SNTP has been initialized, idle ticks require no Wi-Fi
-            // driver query or mutex. Preserve 200 ms event latency and never
-            // queue old presses while authorization/network is unavailable.
-            if (sntpStarted && newNext == 0 && newPrev == 0) continue;
-            bool enabled, configured, invert;
-            xSemaphoreTake(mutex_,portMAX_DELAY);
-            enabled = enabled_;
-            invert = invert_;
-            configured = clientId_[0] && refresh_[0];
-            xSemaphoreGive(mutex_);
-            // Original radio/stalk behavior is always untouched. Spotify follows
-            // observed radio source only when a fresh CAN 0x165 says AUX1/AUX2.
-            if (!enabled || !configured || !AuxSelected() || !IsStationConnected()) continue;
-            if (!sntpStarted) {
+            // The queue is drained even while offline/disabled: no replay after
+            // returning to the car or resuming the iPhone hotspot.
+            SpotifySeekGesture::Event event{};
+            // Initialize the clock in the background as in the proven version.
+            if (!sntpStarted && AuxSelected() && IsStationConnected()) {
                 esp_sntp_config_t ntp = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-                if (esp_netif_sntp_init(&ntp)==ESP_OK) sntpStarted=true;
+                if (esp_netif_sntp_init(&ntp) == ESP_OK) sntpStarted = true;
             }
-            // Certificate validation requires valid wall-clock time.
-            if (time(nullptr)<1704067200) continue;
-            if (newNext + newPrev > 4 || NowMs() < retryAfterMs_) continue;
-            for(uint32_t i=0;i<newNext;i++) if (!SendAction(invert ? "previous" : "next")) break;
-            for(uint32_t i=0;i<newPrev;i++) if (!SendAction(invert ? "next" : "previous")) break;
+            uint32_t handled = 0;
+            while (state_->MediaSeekQueue.Pop(event)) {
+                // No event older than 1.5s; drop flood rather than replay it.
+                if (++handled > 4 || !SpotifySeekGesture::IsFresh(event,
+                        static_cast<uint32_t>(NowMs()))) continue;
+                bool enabled, configured, invert;
+                xSemaphoreTake(mutex_, portMAX_DELAY);
+                enabled = enabled_;
+                invert = invert_;
+                configured = clientId_[0] && refresh_[0];
+                xSemaphoreGive(mutex_);
+                if (!enabled || !configured || !sntpStarted ||
+                    !AuxSelected() || !IsStationConnected() ||
+                    time(nullptr) < 1704067200 || NowMs() < retryAfterMs_) continue;
+                const bool forward = invert ? !event.forward : event.forward;
+                if (SpotifySeekGesture::IsLong(event)) {
+                    SendSeek(forward, event.heldMs);
+                } else {
+                    SendAction(forward ? "next" : "previous");
+                }
+            }
         }
     }
 };
