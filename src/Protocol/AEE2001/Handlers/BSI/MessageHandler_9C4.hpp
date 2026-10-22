@@ -16,6 +16,7 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
     ImmediateSignalCallback _immediateSignalCallback = nullptr;
     bool _lastSeekUp = false;
     bool _lastSeekDown = false;
+    SpotifySeekGesture::Tracker _spotifySeekTracker{};
 
     public:
         static constexpr uint32_t MessageId = 0x9C4;
@@ -74,6 +75,10 @@ class MessageHandler_9C4 : public IMessageHandler<MessageHandler_9C4>
                 __atomic_fetch_add(&carState->MediaPreviousCount, 1U, __ATOMIC_RELAXED);
             _lastSeekUp = seekUp;
             _lastSeekDown = seekDown;
+            // Publish short/long presses only at release, without changing the
+            // original stalk forwarding or existing press-edge counters.
+            _spotifySeekTracker.Observe(seekUp, seekDown,
+                static_cast<uint32_t>(carState->CurrenTime), carState->MediaSeekQueue);
 
             if (_immediateSignalCallback != nullptr)
             {
