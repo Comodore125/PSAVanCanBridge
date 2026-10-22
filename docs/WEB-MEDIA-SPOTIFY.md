@@ -27,12 +27,22 @@ original COM2000 controls (VAN 0x9C4 => CAN 0x21F) are never modified.
 
 The read-only `/api/spotify/status` endpoint also reports
 `radio_source` (0 means unknown/stale) and `aux_active`.
-**Hardware validation required:** passively verify that this RD45 firmware
-really transmits 0x165 with these values in FM/CD/USB/AUX. Until then this
-gate is experimental and fails closed if the source isn't detected.
+**Hardware capture (2026-10-22):** this RD45 emitted 0x165
+`C0 80 40 00` on AUX1, `C0 80 10 00` on FM and
+`C0 86 60 00` on USB. The source mapping has been observed on
+hardware; the hold-to-seek behavior itself still needs an in-car test.
 
 No playlist contents or playback audio are transferred through the bridge.
-This integration provides next/previous commands only; the previous browser
+Short COM2000 SEEK presses still skip next/previous tracks, but are now
+confirmed on button release rather than press. Holding either direction for at
+least 700 ms seeks within the playing track when released: every second held
+corresponds to 10 seconds of seek, capped at 120 seconds. A held direction
+switches with the existing 'Swap seek directions' setting. This is one-shot
+seeking, not continuous audible fast-forward/rewind. A stale or missing release
+is discarded; an old gesture is never replayed after network reconnection.
+Both operations require the RD45 to report a fresh AUX1/AUX2 source.
+
+The previous browser
 \`/media\` buttons and player information remain available when opened.
 
 ## One-time setup
@@ -93,7 +103,9 @@ in read-only status. TLS verification requires successful SNTP time sync
 
 ## Validation needed before daily use
 
-- \`node tests/web-media-smoke.cjs\` for the web control logic.
+- `node tests/web-media-smoke.cjs` for the web control logic.
+- `g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/spotify-seek-gesture-smoke.cpp -o /tmp/seek-test && /tmp/seek-test`
+  for release, duration, queue overflow, clock wrap, and stale-event handling.
 - \`g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/radio-audio-source-smoke.cpp -o /tmp/radio-test && /tmp/radio-test\` for the pure source decoder.
 - \`pio run -e esp32c6_v16\` using the matching custom PlatformIO/ESP-IDF
   environment. This change has **not** been compiled on the specific firmware

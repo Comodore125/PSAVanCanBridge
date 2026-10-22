@@ -8,6 +8,7 @@
 #include "DoorStatus.h"
 #include "OdometerStates.h"
 #include "CarRadioRemote.h"
+#include "SpotifySeekGesture.hpp"
 #include "RadioRemoteVolumeControl.hpp"
 #include "CarSteeringWheelRemote.h"
 #include "AirConditionerState.h"
@@ -157,6 +158,8 @@ struct CarState
     // Read-only media event counters; touched only at VAN input rising edges.
     uint32_t MediaNextCount = 0;
     uint32_t MediaPreviousCount = 0;
+    // Decoupled SPSC gesture events: VAN receive writes, Spotify task reads.
+    SpotifySeekGesture::Queue MediaSeekQueue{};
     // Radio-sourced CAN 0x165 state, packed as an atomic word (see RadioAudioSource.hpp).
     // Unknown at boot; source must be freshly observed before Spotify can react.
     uint32_t RadioAudioSourceStamped = 0;

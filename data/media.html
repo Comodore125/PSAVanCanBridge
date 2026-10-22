@@ -26,7 +26,7 @@ summary{cursor:pointer}a{color:#91dbff}
 </head>
 <body>
 <h1>PSA VAN-CAN Bridge · Media</h1>
-<p class="muted">Web-only proof of concept. VAN → bridge counters → Safari → Spotify Web API. Your RD45 AUX audio path is unchanged.</p>
+<p class="muted">COM2000 → autonomous ESP32 Spotify controller. Keep Waze in front; RD45 AUX audio stays unchanged.</p>
 <section class="card">
 <h2>Steering-stalk input</h2>
 <div class="grid">
@@ -47,7 +47,7 @@ summary{cursor:pointer}a{color:#91dbff}
 </section>
 <section class="card">
 <h2>Spotify authorization</h2>
-<p class="muted">Requires Spotify Premium and a Spotify developer app. Register the exact HTTPS redirect URI in your app, host the included spotify-callback.html there, then copy the callback URL back into the field below. Never enter a client secret here.</p>
+<p class="muted">One-time setup (not required again on each drive): use Spotify Premium and your own Spotify Developer app. Enter its public Client ID and the exact registered HTTPS callback URL below. Press 1 to authorize, copy the FULL URL from the callback page, paste it into step 2 and press 3. Then install authorization on the ESP32 and enable autonomous SEEK. Never enter a client secret here.</p>
 <div class="grid">
 <div><label for="clientId">Spotify Client ID (public)</label><input id="clientId" autocomplete="off" spellcheck="false" placeholder="Spotify app Client ID"></div>
 <div><label for="redirectUri">Registered HTTPS redirect URI</label><input id="redirectUri" autocomplete="off" spellcheck="false" placeholder="https://your-domain/spotify-callback.html"></div>
@@ -64,7 +64,7 @@ summary{cursor:pointer}a{color:#91dbff}
 </section>
 <section class="card" id="standaloneCard">
 <h2>Background Spotify control · ESP32</h2>
-<p class="muted">Once authorized, install Spotify permissions onto the bridge and enable autonomous seek handling. Your normal iPhone Spotify app plays through FiiO USB DAC → RD45 AUX. Waze may stay in the foreground; Safari is not required after setup.</p>
+<p class="muted">Once authorized, install Spotify permissions onto the bridge and enable autonomous seek handling. Your normal iPhone Spotify app plays through FiiO USB DAC → RD45 AUX. Waze may stay in the foreground; Safari is not required after setup. Short SEEK skips on release; hold SEEK for at least 0.7 seconds to seek within the track (10 seconds per second held, max 2 minutes).</p>
 <div class="grid">
   <div><label>Bridge controller</label><span id="standaloneState" class="status">Checking…</span></div>
   <div><label>Last action / Spotify HTTP</label><strong id="standaloneAction">—</strong></div>

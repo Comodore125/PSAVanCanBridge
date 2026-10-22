@@ -67,9 +67,11 @@ let simulated = [
   { next_count: 1, previous_count: 1, seek_up: false, seek_down: true },
 ];
 let offline = false;
+let simulatedStandalone = {ready:true,configured:false,enabled:false,online:false,
+  last_http:0,last_action:"",error:""};
 async function fakeFetch(url, opts={}) {
   if (String(url).includes("/api/spotify/status")) {
-    return {ok:true, json:async()=>({ready:true, configured:false,enabled:false,online:false,last_http:0,last_action:"",error:""})};
+    return {ok:true, json:async()=>({...simulatedStandalone})};
   }
   if (String(url).includes("/api/spotify/")) {
     return {ok:true, json:async()=>({configured:true,enabled:!!opts.body&&JSON.parse(opts.body).enabled===true})};
@@ -144,6 +146,11 @@ async function main() {
     return refreshStandalone().finally(()=>{fetch=oldFetch;}); })()`,context);
   assert.equal(element("active").disabled,true,"No double control when ESP32 is autonomous");
   assert.equal(element("active").checked,false,"Autonomous control unchecks browser forwarding");
+  // A real ESP32 persists autonomous mode between page visibility changes.
+  // Keep the default fake status consistent with that stored state; otherwise
+  // visibility refresh silently reverts the mock to "Not installed".
+  simulatedStandalone = {ready:true,configured:true,enabled:true,online:true,
+    aux_active:true,radio_source:4,last_http:204,last_action:"next",error:""};
 
   offline = true;
   await vm.runInContext("pollBridge()",context);await settle();

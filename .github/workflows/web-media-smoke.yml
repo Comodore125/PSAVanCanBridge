@@ -1,7 +1,7 @@
 name: Web media smoke checks
 on:
   push:
-    branches: [feature/3.9.2-wifi-steering-media]
+    branches: [feature/3.9.2-wifi-steering-media, feat/3.9.2-spotify-hold-seek]
   pull_request:
     paths:
       - "data/media.html"
@@ -12,6 +12,10 @@ on:
       - "src/Helpers/WebServer/WebServer.hpp"
       - "src/Protocol/AEE2001/Handlers/BSI/MessageHandler_9C4.hpp"
       - "src/Helpers/CarState.hpp"
+      - "src/Helpers/SpotifySeekGesture.hpp"
+      - "src/Helpers/SpotifyBridge.hpp"
+      - "src/Protocol/AEE2001/Handlers/BSI/MessageHandler_9C4.hpp"
+      - "tests/spotify-seek-gesture-smoke.cpp"
       - "tests/web-media-smoke.cjs"
       - ".github/workflows/web-media-smoke.yml"
   workflow_dispatch:
@@ -28,6 +32,12 @@ jobs:
         run: node tests/web-media-smoke.cjs
       - name: Validate optimized telecoding JavaScript
         run: node tests/telecoding-asset-smoke.cjs
+      - name: Validate RD45 source and Spotify seek gestures (host C++17)
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/radio-audio-source-smoke.cpp -o /tmp/radio-source-test
+          /tmp/radio-source-test
+          g++ -std=c++17 -Wall -Wextra -Werror -Isrc tests/spotify-seek-gesture-smoke.cpp -o /tmp/spotify-gesture-test
+          /tmp/spotify-gesture-test
       - name: Check media HTML extraction
         run: |
           test -s data/media.html
