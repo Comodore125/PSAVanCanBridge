@@ -123,3 +123,44 @@ endpoints. Even when the Spotify app is already playing locally on iPhone,
 commands may have network delay and can fail while the phone or bridge has no
 Internet. This cannot provide the instantaneous guarantees of a local
 Bluetooth AVRCP/HID media key.
+
+
+## OEM EMF-C text probe (experimental, BENCH ONLY)
+
+An off-by-default section in `/media` can preview the verified USB OEM
+metadata format `0x63` over CAN `0x2E3`. It provides a captured Michael
+Jackson test payload or the already-fetched Spotify artist/title; no extra
+Spotify polling or persisted enable flag is introduced.
+
+The **Send one OEM 0x63 test** control requires both a checkbox and a
+second browser confirmation of isolated CAN bench wiring. The firmware
+also insists on *fresh AUX1 from 0x165* and at least 30 seconds of
+`0x2E3` RX silence. These are **software interlocks, not proof that no
+other CAN node can transmit 0x2E3**. Do not use TX on the shared road-car
+CAN bus. Merely enabling the firmware or opening the /media page does
+not transmit any OEM display frames.
+
+The bridge emits a bounded, ISO-TP single or first frame; for multi-frame
+payloads it waits for real physical `0x15F` Flow Control (0x30, BS=0),
+then sends CFs with the indicated separation time (minimum 10 ms). No
+CAN ID spoofing, no modification of `0x165`, no changes to the standard
+bridge message scheduler, and no recurring metadata TX. On unexpected
+flow control, absent AUX1, observed `0x2E3` activity or a timeout the
+operation aborts. The HTTP response reports only the transport
+result, **not whether the EMF-C drew anything**.
+
+After transmitting, use the existing Destination CAN monitor for
+`0x2E3`, `0x15F`, and `0x165` and record a photograph of the physical
+EMF-C. Its existing network/direction filter may require separate
+captures for Incoming and Outgoing. For a conclusive experiment:
+1. Confirm actual AUX1, with no competing transmitter on the same CAN ID.
+2. First send the known captured OEM sample (not Spotify).
+3. Note Flow Control and the actual EMF-C image.
+4. Only then test Spotify track metadata with the same transport.
+The OEM display glyph mapping for Unicode has not been established;
+non-ASCII UTF-8 characters are conservatively replaced with '?'.
+
+CI runs an independent native ISO-TP encoder test and the complete
+ESP32-C6 build. The *actual* `firmware.bin` must fit **both** 0x140000-byte
+OTA slots from `partitions.csv` with at least 4096 bytes remaining, or
+the workflow fails before artifact publication.
