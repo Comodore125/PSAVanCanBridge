@@ -67,9 +67,19 @@ let simulated = [
   { next_count: 1, previous_count: 1, seek_up: false, seek_down: true },
 ];
 let offline = false;
+let lastOemPacket = null;
 let simulatedStandalone = {ready:true,configured:false,enabled:false,online:false,
   last_http:0,last_action:"",error:""};
 async function fakeFetch(url, opts={}) {
+  if (String(url).includes("/api/oem/status")) {
+    const payload=new Uint32Array(12);
+    payload[0]=0x4F454D31;payload[9]=4;payload[5]=0x30000A;
+    return {ok:true,arrayBuffer:async()=>payload.buffer};
+  }
+  if (String(url).includes("/api/oem/display-test")) {
+    lastOemPacket=opts.body;
+    return {ok:true,status:200,text:async()=>"acknowledged"};
+  }
   if (String(url).includes("/api/spotify/status")) {
     return {ok:true, json:async()=>({...simulatedStandalone})};
   }
@@ -96,6 +106,7 @@ const context = vm.createContext({
   AbortController,
   URL,
   URLSearchParams,
+  TextEncoder,
   btoa,
   console
 });
@@ -104,6 +115,20 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 async function main() {
   vm.runInContext(code, context);
   await settle(); // Initial read starts automatically
+  assert.match(element("oemTrace").textContent,/SOURCE: AUX1/,
+    "OEM status must not consume media event counters");
+  await vm.runInContext('oemPost("display-test",{mode:0})',context);
+  assert.equal(lastOemPacket.byteLength,5,"Stop uses bounded binary envelope");
+  assert.equal(lastOemPacket[0],0,"Stop action mode");
+  await vm.runInContext('oemPost("display-test",{mode:2,artist:"A",title:"B",interval_ms:5000,confirmed:true})',context);
+  assert.deepEqual([...lastOemPacket],[2,0,1,1,0xA5,65,66],
+    "Repeat request encodes mode, interval and exact UTF-8 metadata");
+  assert.equal(element("oemResult").textContent.startsWith("Stopped"),true,
+    "Repeat stop uses independent OEM endpoint");
+  await assert.rejects(
+    Promise.resolve().then(()=>vm.runInContext('oemConfirm("Send")',context)),
+    /Confirm the shared-bus risk/,
+    "Unacknowledged OEM transmit remains blocked");
   assert.equal(element("counts").textContent, "0 / 0", "Initial counters");
   assert.equal(vm.runInContext("base64url(sha256Ascii('abc'))", context), "ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0", "SHA-256 test vector");
   assert.equal(vm.runInContext("base64url(sha256Ascii('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'))",context), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "RFC 7636 PKCE test vector");

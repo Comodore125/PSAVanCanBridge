@@ -39,7 +39,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <label><input type="checkbox" id="active"> Enable stalk-to-Spotify forwarding</label>
 <label><input type="checkbox" id="invert"> Swap seek directions</label>
 </div>
-<p class="muted">Counters count rising edges in VAN 0x9C4; initial readings do not trigger songs. Hold, release, and press again for a new event.</p>
+<p class="muted">VAN 0x9C4 counters register press edges; repeats are suppressed.</p>
 <div class="row">
 <button id="testNext">Test Next event</button><button id="testPrevious">Test Previous event</button>
 <button id="clearLog">Clear log</button>
@@ -47,7 +47,7 @@ summary{cursor:pointer}a{color:#91dbff}
 </section>
 <section class="card">
 <h2>Spotify authorization</h2>
-<p class="muted">One-time setup (not required again on each drive): use Spotify Premium and your own Spotify Developer app. Enter its public Client ID and the exact registered HTTPS callback URL below. Press 1 to authorize, copy the FULL URL from the callback page, paste it into step 2 and press 3. Then install authorization on the ESP32 and enable autonomous SEEK. Never enter a client secret here.</p>
+<p class="muted">One-time Spotify Premium setup: enter your app's public Client ID and registered HTTPS callback. Authorize (1), paste the FULL callback URL (2), complete (3), then install authorization on ESP32. Never enter a client secret.</p>
 <div class="grid">
 <div><label for="clientId">Spotify Client ID (public)</label><input id="clientId" autocomplete="off" spellcheck="false" placeholder="Spotify app Client ID"></div>
 <div><label for="redirectUri">Registered HTTPS redirect URI</label><input id="redirectUri" autocomplete="off" spellcheck="false" placeholder="https://your-domain/spotify-callback.html"></div>
@@ -60,11 +60,11 @@ summary{cursor:pointer}a{color:#91dbff}
 <label for="callbackValue">2 · Paste the FULL callback URL (OAuth state must match)</label>
 <input id="callbackValue" autocomplete="off" spellcheck="false" placeholder="https://…?code=…&state=…">
 <button id="exchange">3 · Complete authorization</button>
-<p class="muted">Tokens stay in this browser's session storage only. Navigation to a different browser or a Private tab loses the session. Spotify access needs Internet even while connected to the bridge's Wi-Fi.</p>
+<p class="muted">Browser tokens live in session storage. Complete OAuth in the same browser; Spotify needs Internet.</p>
 </section>
 <section class="card" id="standaloneCard">
 <h2>Background Spotify control · ESP32</h2>
-<p class="muted">Once authorized, install Spotify permissions onto the bridge and enable autonomous seek handling. Your normal iPhone Spotify app plays through FiiO USB DAC → RD45 AUX. Waze may stay in the foreground; Safari is not required after setup. Short SEEK skips on release; hold SEEK for at least 0.7 seconds to seek within the track (10 seconds per second held, max 2 minutes).</p>
+<p class="muted">Install authorization on ESP32 and enable autonomous SEEK. iPhone → FiiO DAC → RD45 AUX works with Safari closed. Short SEEK skips on release; hold ≥0.7 s to seek 10 seconds per second (max 120 seconds).</p>
 <div class="grid">
   <div><label>Bridge controller</label><span id="standaloneState" class="status">Checking…</span></div>
   <div><label>Last action / Spotify HTTP</label><strong id="standaloneAction">—</strong></div>
@@ -77,7 +77,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <button id="standaloneDisable">Disable autonomous SEEK</button>
 <button id="standaloneClear" class="danger">Erase bridge Spotify authorization</button>
 </div>
-<p class="muted">Spotify SEEK is sent only while the RD45 itself reports AUX1/AUX2 in a fresh CAN 0x165 status. The COM2000 remote always retains its original behavior. Provisioning works only while the bridge is connected to a secure Wi-Fi station/hotspot with Internet access. You must authorize Spotify first using the existing PKCE controls above. Once enabled, the bridge handles steering-stalk presses itself, without web-page polling. It does not change CAN/VAN traffic or audio routing. Credentials are stored locally in ESP32 NVS; do not enable this on an untrusted network.</p>
+<p class="muted">Spotify controls require fresh CAN 0x165 AUX1/AUX2; original COM2000 forwarding is unchanged. Setup needs trusted Internet-connected Wi-Fi. Once enabled, the ESP32 acts without Safari. Refresh permission remains in ESP32 NVS; do not use untrusted networks.</p>
 </section>
 <section class="card">
 <h2>Now playing</h2>
@@ -99,19 +99,24 @@ summary{cursor:pointer}a{color:#91dbff}
 </section>
 <section class="card" id="oemProbeCard">
 <h2>OEM EMF-C metadata test · experimental</h2>
-<p class="muted">Preview Spotify artist/title as RD45 USB-like 0x63 data on CAN 0x2E3. No SOURCE spoofing. This test is OFF by default and never sends automatically. Only transmit with the RD45 on AUX1 on a physically isolated bench with no competing 0x2E3 transmitter.</p>
+<p class="muted">AUX1 OEM 0x63 PoC: one-shot or up to eight repeats; OFF after reboot, never spoofs SOURCE. Shared CAN ID 0x2E3 may collide: test parked, engine off, after checking CAN traffic.</p>
 <div class="row">
 <button id="oemSample">Preview captured OEM sample</button>
 <button id="oemSpotify">Preview current Spotify track</button>
 </div>
 <p id="oemPreview" class="muted">No test metadata loaded.</p>
-<label><input id="oemIsolated" type="checkbox"> I confirm isolated CAN bench wiring and no other 0x2E3 transmitter</label>
-<div class="row"><button id="oemSend" class="danger">Send one OEM 0x63 test</button></div>
-<p class="muted" id="oemResult" role="status">Idle. Use Destination CAN Incoming/Outgoing monitor for 0x2E3 / 0x15F / 0x165. An ISO-TP flow-control reply does not prove the EMF-C displayed the text.</p>
+<label><input id="oemIsolated" type="checkbox"> I understand that 30s without RX 0x2E3 does not guarantee exclusive ownership of this CAN ID</label>
+<div class="row">
+<button id="oemSend" class="danger">Send one OEM 0x63 test</button>
+<select id="oemInterval" aria-label="Repeat interval"><option value="10000">Every 10 seconds</option><option value="5000">Every 5 seconds</option><option value="30000">Every 30 seconds</option></select>
+<button id="oemRepeat">Start repeat (max 8)</button><button id="oemStop">Stop repeat</button>
+</div>
+<div><label>CAN transport diagnostics</label><pre id="oemTrace">No capture yet</pre></div>
+<p class="muted" id="oemResult" role="status">Idle. Check the CAN monitor; RX 0x15F confirms flow control, not rendered text.</p>
 </section>
 <details class="card">
 <summary>Diagnostics, test status and limitations</summary>
-<p class="muted">Safari background execution is not guaranteed; when the screen locks, browser-based stalk forwarding can stop. Spotify can return 403, 404, 429 or 204. A SoftAP-only bridge does not supply Internet. CAN injection exists only through a deliberate, bench-confirmed one-shot OEM probe; never use on a shared in-car bus.</p>
+<p class="muted">Browser forwarding stops when Safari sleeps; autonomous ESP32 control does not. SoftAP alone has no Spotify Internet. OEM TX is guarded but not guaranteed collision-free.</p>
 <div id="log" role="log" aria-live="polite"></div>
 </details>
 <p class="muted"><a href="/">Bridge configuration</a> · Media additions do not change existing VAN/CAN messages or RD45/AUX operation.</p>
@@ -408,41 +413,84 @@ bind("prev",()=>control("previous"));
 bind("testNext",()=>stalk("next"));
 bind("testPrevious",()=>stalk("previous"));
 bind("refresh",refreshPlayer);
-// Bench-only OEM metadata experiment. Preview uses already fetched Spotify
-// playback data; no autonomous CAN TX, timers or additional Spotify polling.
-let oemArtist="", oemTitle="";
+// OEM probe uses the existing track snapshot; no extra Spotify polling.
+let oemArtist="",oemTitle="";
 function setOemPreview(artist,title) {
-  oemArtist=artist||""; oemTitle=title||"";
+  oemArtist=artist||"";oemTitle=title||"";
   $("oemPreview").textContent=oemArtist&&oemTitle ?
-    oemArtist+" — "+oemTitle : "No active Spotify track to preview.";
+    oemArtist+" — "+oemTitle : "No metadata available.";
 }
 bind("oemSample",()=>setOemPreview("Michael Jackson","Can't Get Outta The Rain"));
 bind("oemSpotify",async()=>{
   if(!player?.item)await refreshPlayer();
   const item=player?.item;
-  if(!item)throw Error("No Spotify track: start playback and refresh first");
+  if(!item)throw Error("No active Spotify track");
   setOemPreview((item.artists||[]).map(a=>a.name).join(", "),item.name);
 });
-bind("oemSend",async()=>{
-  if(!$("oemIsolated").checked)
-    throw Error("Confirm physically isolated CAN bench before OEM transmission");
+function oemConfirm(action) {
+  if(!$("oemIsolated").checked)throw Error("Confirm the shared-bus risk first");
   if(!oemArtist||!oemTitle)throw Error("Preview metadata first");
-  if(!windowConfirmOem())throw Error("OEM display test cancelled");
-  const res=await fetch(location.origin+"/api/oem/display-test",{
-    method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",
-    body:JSON.stringify({artist:oemArtist,title:oemTitle,isolated:true})
-  });
-  const result=(await res.text()).slice(0,250);
-  $("oemResult").textContent=result;
-  log("OEM 0x2E3 bench test: "+result);
-  if(!res.ok)throw Error("OEM probe HTTP "+res.status+": "+result);
-});
-function windowConfirmOem() {
-  // A second deliberate confirmation. Not persistent across page reloads.
-  return typeof confirm==="function" && confirm(
-    "BENCH ONLY: RD45 must stay on AUX1, with no competing CAN 0x2E3 sender. Transmit one ISO-TP test?");
+  if(typeof confirm!=="function" || !confirm(
+    "Stationary vehicle, engine off, RD45 AUX1. "+action+
+    " CAN ID 0x2E3? Quiet CAN alone does not guarantee no collision.")) {
+    throw Error("OEM test cancelled");
+  }
 }
-
+async function oemPost(url,payload) {
+  const utf8=new TextEncoder();
+  const artist=utf8.encode(payload.artist||"");
+  const title=utf8.encode(payload.title||"");
+  if(artist.length>64||title.length>80)throw Error("OEM metadata too long");
+  const intervalIndex=({"5000":0,"10000":1,"30000":2})[String(payload.interval_ms||10000)];
+  const data=new Uint8Array(5+artist.length+title.length);
+  data.set([payload.mode,intervalIndex??1,artist.length,title.length,
+    payload.confirmed?0xA5:0]);
+  data.set(artist,5);data.set(title,5+artist.length);
+  const res=await fetch(location.origin+"/api/oem/"+url,{
+    method:"POST",cache:"no-store",headers:{"Content-Type":"application/octet-stream"},
+    body:data
+  });
+  const result=(await res.text()).slice(0,200);
+  $("oemResult").textContent=result;
+  log("OEM "+url+": "+result);
+  if(!res.ok)throw Error("OEM "+url+" HTTP "+res.status+": "+result);
+  await refreshOemStatus();
+}
+bind("oemSend",async()=>{
+  oemConfirm("Send one");
+  await oemPost("display-test",{mode:1,artist:oemArtist,title:oemTitle,confirmed:true});
+});
+bind("oemRepeat",async()=>{
+  oemConfirm("Start at most 8 repeated");
+  await oemPost("display-test",{mode:2,artist:oemArtist,title:oemTitle,
+    interval_ms:Number($("oemInterval").value),confirmed:true});
+});
+bind("oemStop",()=>oemPost("display-test",{mode:0}));
+async function refreshOemStatus() {
+  try {
+    const r=await fetch(location.origin+"/api/oem/status",{cache:"no-store"});
+    if(!r.ok)throw Error("HTTP "+r.status);
+    const buffer=await r.arrayBuffer();
+    if(buffer.byteLength!==48)throw Error("Bad OEM telemetry size");
+    const view=new DataView(buffer),at=i=>view.getUint32(i*4,true);
+    if(at(0)!==0x4F454D31)throw Error("Unknown OEM telemetry version");
+    const d={repeat:!!(at(1)&1),remaining:at(3),last_code:at(4),
+      last_fc:at(5),tx_frames:at(6),rx_fc:at(7),rx_2e3:at(8),
+      source:at(9),since_peer_ms:at(10),awaiting_fc:!!at(11)};
+    const reasons=["idle","complete: check physical EMF-C","single frame sent",
+      "AUX1 status missing","0x2E3 active / quiet time","TX failed",
+      "FC timeout","unsupported FC","","invalid metadata","CAN unavailable"];
+    $("oemResult").textContent=(d.repeat?"Repeating · ":"Stopped · ")+
+      "remaining "+d.remaining+" · "+(reasons[d.last_code]||"unknown")+
+      " · TX "+d.tx_frames+" · FC "+d.rx_fc+" · peer 0x2E3 "+d.rx_2e3;
+    const sources=["Unknown","FM","CD","CD changer","AUX1","AUX2","USB","Streaming"];
+    $("oemTrace").textContent="SOURCE: "+(sources[d.source]||"Unknown")+
+      " · last FC: 0x"+d.last_fc.toString(16).toUpperCase().padStart(6,"0")+
+      " · last incoming 2E3: "+(d.since_peer_ms/1000).toFixed(1)+"s"+
+      (d.awaiting_fc?" · waiting for 15F":"")+
+      "\\nFull timestamped frames: Destination CAN monitor (Incoming / Outgoing).";
+  }catch(e){$("oemTrace").textContent="OEM diagnostics unavailable: "+e;}
+}
 bind("clearLog",()=>{logEntries=[];$("log").textContent="";});
 bind("pause",async()=>{if(!player)throw Error("Refresh an active playback device first");await apiAction(player.is_playing?"/me/player/pause":"/me/player/play","PUT");});
 bind("shuffle",()=>apiAction("/me/player/shuffle?state="+(!player?.shuffle_state),"PUT"));
@@ -489,8 +537,9 @@ document.addEventListener("visibilitychange",()=>{
   }
 });
 // Exactly one status timer; page transitions must never multiply requests.
-setInterval(()=>{if(!document.hidden)refreshStandalone();},5000);
+setInterval(()=>{if(!document.hidden){refreshStandalone();refreshOemStatus();}},5000);
 refreshStandalone();
+refreshOemStatus();
 pollLoop();
 setInterval(()=>{if(tokens&&!document.hidden)refreshPlayer();},6500);
 if(tokens)refreshPlayer();

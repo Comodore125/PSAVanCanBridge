@@ -125,42 +125,48 @@ Internet. This cannot provide the instantaneous guarantees of a local
 Bluetooth AVRCP/HID media key.
 
 
-## OEM EMF-C text probe (experimental, BENCH ONLY)
+## OEM EMF-C 0x63 diagnostics and capped repeated PoC
 
-An off-by-default section in `/media` can preview the verified USB OEM
-metadata format `0x63` over CAN `0x2E3`. It provides a captured Michael
-Jackson test payload or the already-fetched Spotify artist/title; no extra
-Spotify polling or persisted enable flag is introduced.
+This branch is experimental and is intentionally **separate from the working
+Spotify + HOLD SEEK version**. The section at `/media` lets you prepare
+the verified OEM USB sample or a snapshot of the current Spotify track.
+The sample is sent with type `0x63` on ISO-TP ID `0x2E3`; replies are
+received on `0x15F`. The RD45 source remains **AUX1** (CAN `0x165`).
 
-The **Send one OEM 0x63 test** control requires both a checkbox and a
-second browser confirmation of isolated CAN bench wiring. The firmware
-also insists on *fresh AUX1 from 0x165* and at least 30 seconds of
-`0x2E3` RX silence. These are **software interlocks, not proof that no
-other CAN node can transmit 0x2E3**. Do not use TX on the shared road-car
-CAN bus. Merely enabling the firmware or opening the /media page does
-not transmit any OEM display frames.
+Modes:
+- **One-shot:** one deliberate ISO-TP transaction.
+- **Repeat:** repeat the same selected preview metadata every 5, 10, or
+  30 seconds, at most **eight sends**, then automatically stop.
+- **Stop:** disable future repeated transmissions immediately. A
+  transaction already on the bus may finish/abort on its next frame.
+- **Status:** fixed-size, allocation-free counters for TX `0x2E3`,
+  RX `0x15F`, competing RX `0x2E3`, SOURCE, last FC,
+  completion code and remaining repetitions. The original Destination
+  CAN monitor provides the full timestamped frame sequence; there is
+  no duplicate ring buffer in MCU RAM.
 
-The bridge emits a bounded, ISO-TP single or first frame; for multi-frame
-payloads it waits for real physical `0x15F` Flow Control (0x30, BS=0),
-then sends CFs with the indicated separation time (minimum 10 ms). No
-CAN ID spoofing, no modification of `0x165`, no changes to the standard
-bridge message scheduler, and no recurring metadata TX. On unexpected
-flow control, absent AUX1, observed `0x2E3` activity or a timeout the
-operation aborts. The HTTP response reports only the transport
-result, **not whether the EMF-C drew anything**.
+The repeated mode uses the existing 200ms low-priority Spotify task, not
+a new RTOS task or CAN/VAN scheduler operation. No additional Spotify
+background polling occurs. Previewing a new track **does not** change
+the already configured repeat text; stop/re-arm to replace its snapshot.
+The mode is OFF after reboot; no enable flag is persisted in NVS.
 
-After transmitting, use the existing Destination CAN monitor for
-`0x2E3`, `0x15F`, and `0x165` and record a photograph of the physical
-EMF-C. Its existing network/direction filter may require separate
-captures for Incoming and Outgoing. For a conclusive experiment:
-1. Confirm actual AUX1, with no competing transmitter on the same CAN ID.
-2. First send the known captured OEM sample (not Spotify).
-3. Note Flow Control and the actual EMF-C image.
-4. Only then test Spotify track metadata with the same transport.
-The OEM display glyph mapping for Unicode has not been established;
-non-ASCII UTF-8 characters are conservatively replaced with '?'.
+Safety and interpretation:
+- Explicit checkbox and a fresh confirmation dialog are necessary before
+  initiating TX. Only use parked, with engine off.
+- The bridge requires fresh `0x165` SOURCE=AUX1 and 30 seconds without
+  seeing incoming `0x2E3`. Encountering incoming `0x2E3` during repeat
+  disables further repetitions.
+- **This cannot guarantee CAN exclusivity on the shared vehicle bus.**
+  A dormant RD45 may start sending the same ID asynchronously.
+- The status `ISO-TP complete` means our transmit calls succeeded.
+  It does NOT prove the EMF-C drew the new text; confirm physically.
+- Source change is carried numerically in `0x165` (`SRC_SEL` bits 3.6-3.4,
+  AUX1=4, USB=6). The label `INPUT AUX 1` is probably selected internally
+  by the EMF-C; a literal string sent by RD45 has not been confirmed.
 
-CI runs an independent native ISO-TP encoder test and the complete
-ESP32-C6 build. The *actual* `firmware.bin` must fit **both** 0x140000-byte
-OTA slots from `partitions.csv` with at least 4096 bytes remaining, or
-the workflow fails before artifact publication.
+Real size gate: GitHub Actions builds the ESP32-C6 v1.6
+`firmware.bin`, verifies both `0x140000` OTA partitions from
+`partitions.csv`, and rejects artifacts with under 4096 bytes of
+OTA headroom. Tests also verify browser behavior, input gestures, metadata
+framing and optimized telecoding assets.

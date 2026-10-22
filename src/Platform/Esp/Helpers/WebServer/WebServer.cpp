@@ -42,6 +42,7 @@ namespace
         { "/api/spotify/enable", HTTP_POST, &WebServer::post_spotify_enable_handler, false },
         { "/api/spotify/clear", HTTP_POST, &WebServer::post_spotify_clear_handler, false },
         { "/api/oem/display-test", HTTP_POST, &WebServer::post_oem_display_probe_handler, false },
+        { "/api/oem/status", HTTP_GET, &WebServer::get_oem_status_handler, false },
         { "/api/reboot", HTTP_GET, &WebServer::get_reboot_handler, false },
         { "/api/getVin", HTTP_GET, &WebServer::get_vin_handler, false },
         { "/api/config.json", HTTP_GET, &WebServer::get_config_handler, false },
@@ -666,34 +667,51 @@ esp_err_t WebServer::post_spotify_clear_handler(httpd_req_t *req)
     return httpd_resp_sendstr(req, "{\"configured\":false,\"enabled\":false}");
 }
 
-// Only a deliberate bench-confirmed POST can originate OEM CAN metadata.
-// This never stores an enable flag and cannot auto-transmit on reboot.
+// Deliberate, nonpersistent CAN metadata proof of concept.
+esp_err_t WebServer::get_oem_status_handler(httpd_req_t *req)
+{
+    uint32_t words[OemDisplayProbe::TelemetryWords]{};
+    OemDisplayProbe::Instance().Snapshot(words);
+    httpd_resp_set_type(req,"application/octet-stream");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    return httpd_resp_send(req,reinterpret_cast<const char*>(words),sizeof(words));
+}
+
+// Compact, bounded binary OEM command; no heap, strings or JSON parser.
+// Wire format: mode, interval selector, artist_len, title_len, confirm,
+//              artist UTF-8 bytes, title UTF-8 bytes.
 esp_err_t WebServer::post_oem_display_probe_handler(httpd_req_t *req)
 {
-    if (!SpotifyBridge::IsHotspotAvailable()) {
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Private STA Wi-Fi required");
+    uint8_t buf[149]{};
+    const size_t len=req->content_len;
+    if(len<5 || len>sizeof(buf))
+        return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"OEM payload length");
+    size_t received=0;
+    while(received<len) {
+        const int n=httpd_req_recv(req,reinterpret_cast<char*>(buf)+received,len-received);
+        if(n<=0)return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"OEM receive failed");
+        received+=n;
     }
-    cJSON* root = ReceiveJsonBody(req, 256);
-    if (!root) return ESP_OK;
-    const cJSON* artist = cJSON_GetObjectItemCaseSensitive(root, "artist");
-    const cJSON* title = cJSON_GetObjectItemCaseSensitive(root, "title");
-    const cJSON* isolated = cJSON_GetObjectItemCaseSensitive(root, "isolated");
-    const bool valid = cJSON_IsString(artist) && cJSON_IsString(title) &&
-                       artist->valuestring && title->valuestring &&
-                       strlen(artist->valuestring) <= 64 &&
-                       strlen(title->valuestring) <= 80 &&
-                       cJSON_IsTrue(isolated);
-    if (!valid) {
-        cJSON_Delete(root);
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
-                                   "Artist/title and explicit isolated bench confirmation required");
+    const uint8_t mode=buf[0],interval=buf[1],a=buf[2],b=buf[3];
+    if(mode==0) {
+        OemDisplayProbe::Instance().Stop();
+        return httpd_resp_sendstr(req,"stopped");
     }
-    const char* result = OemDisplayProbe::Instance().Send(
-        artist->valuestring, title->valuestring, true);
-    cJSON_Delete(root);
-    httpd_resp_set_type(req, "text/plain; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_sendstr(req, result);
+    if((mode!=1 && mode!=2) || buf[4]!=0xA5 ||
+       a==0 || b==0 || a>64 || b>80 || len!=size_t(5+a+b) ||
+       !SpotifyBridge::IsHotspotAvailable())
+        return httpd_resp_send_err(req,HTTPD_400_BAD_REQUEST,"OEM guarded request refused");
+    char artist[65]{},title[81]{};
+    memcpy(artist,buf+5,a);memcpy(title,buf+5+a,b);
+    const char* result="invalid interval";
+    if(mode==1)result=OemDisplayProbe::Instance().Send(artist,title,true);
+    else if(interval<=2) {
+        const uint32_t delays[]={5000,10000,30000};
+        result=OemDisplayProbe::Instance().StartRepeat(artist,title,delays[interval],true)
+            ? "repeat armed: max 8" : "repeat refused: AUX1 or CAN busy";
+    }
+    httpd_resp_set_type(req,"text/plain; charset=utf-8");
+    return httpd_resp_sendstr(req,result);
 }
 
 esp_err_t WebServer::get_time_handler(httpd_req_t *req)
