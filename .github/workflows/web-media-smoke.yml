@@ -1,7 +1,7 @@
 name: Web media smoke checks
 on:
   push:
-    branches: [feature/3.9.2-wifi-steering-media, feat/3.9.2-spotify-hold-seek, feat/3.9.2-spotify-oem-display-probe]
+    branches: [feature/3.9.2-wifi-steering-media, feat/3.9.2-spotify-hold-seek, feat/3.9.2-spotify-oem-display-probe, feat/3.9.2-oem-diag-repeat-poc]
   pull_request:
     paths:
       - "data/media.html"
@@ -71,7 +71,7 @@ jobs:
       - name: Upload experimental firmware for bench validation
         uses: actions/upload-artifact@v4
         with:
-          name: experimental-392-oem-probe-esp32c6-v16
+          name: experimental-392-oem-diag-repeat-esp32c6-v16
           path: .pio/build/esp32c6_v16/firmware.bin
           if-no-files-found: error
           retention-days: 7
