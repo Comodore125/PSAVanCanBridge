@@ -23,17 +23,17 @@ public:
     void Observe(const BusMessage& m) {
         if (m.id == 0x165 && m.dataLength >= 3) {
             uint8_t source = (m.data[0] & 0x80) ? ((m.data[2] >> 4) & 7) : 0;
-            if (source != lastSource_.exchange(source)) Trace(5, source);
+            lastSource_.store(source);
         } else if (m.id == 0x2E3) {
             lastPeerMs_.store(NowMs());
             ++peerCount_;
-            Trace(4, Pack(m));
+
             // Fail closed on another sender, even in the middle of a series.
             periodic_.store(false);
         } else if (m.id == 0x15F && m.dataLength >= 3) {
             ++fcCount_;
             const uint32_t fc = Pack(m);
-            Trace(3, fc);
+
             if (awaitFc_.load()) flowControl_.store(0x1000000U | fc);
         }
     }
@@ -66,7 +66,7 @@ public:
             remaining_ = 8; // 8 sends maximum; no permanent CAN traffic.
             nextMs_ = NowMs(); // first attempt on next low-priority tick
             periodic_.store(true);
-            Trace(6, interval);
+
         }
         busy_.store(false);
         return ok;
@@ -74,7 +74,7 @@ public:
 
     void Stop() {
         periodic_.store(false);
-        Trace(7, 0);
+
     }
 
     // Invoked once per 200ms from the existing Spotify task: no extra RTOS task,
@@ -94,32 +94,21 @@ public:
         busy_.store(false);
     }
 
-    // Fixed-size little-endian telemetry (144 B). Avoid JSON allocations and
-    // snprintf formatting on ESP32: /media decodes this via DataView.
-    static constexpr size_t TelemetryWords = 36;
+    // Fixed-size little-endian telemetry. Full raw frame timeline already
+    // exists in the bridge CAN monitor; do not duplicate it in MCU RAM/flash.
+    static constexpr size_t TelemetryWords = 12;
     void Snapshot(uint32_t* out) const {
-        const uint32_t now=NowMs();
         out[0]=0x4F454D31U; // OEM1 protocol version
         out[1]=(periodic_.load()?1U:0U)|(busy_.load()?2U:0U);
         out[2]=intervalMs_.load(); out[3]=remaining_.load();
         out[4]=lastCode_.load(); out[5]=lastFc_.load();
         out[6]=txCount_.load(); out[7]=fcCount_.load();
         out[8]=peerCount_.load(); out[9]=lastSource_.load();
-        out[10]=now-lastPeerMs_.load();
-        const uint32_t head=traceHead_.load();
-        const uint32_t count=head<12?head:12;
-        out[11]=count;
-        for(uint32_t i=0;i<12;++i) {
-            const uint32_t slot=(head-count+i)%12;
-            out[12+i*2]=i<count?traces_[slot].at.load():0;
-            out[13+i*2]=i<count?traces_[slot].tag.load():0;
-        }
+        out[10]=NowMs()-lastPeerMs_.load();
+        out[11]=awaitFc_.load()?1U:0U;
     }
 
 private:
-    struct TraceEntry { std::atomic<uint32_t> at{0}, tag{0}; };
-    TraceEntry traces_[12]{};
-    std::atomic<uint32_t> traceHead_{0};
     std::atomic<uint32_t> lastPeerMs_{0}, flowControl_{0}, lastFc_{0};
     std::atomic<uint32_t> txCount_{0}, fcCount_{0}, peerCount_{0};
     std::atomic<uint8_t> lastSource_{0}, lastCode_{0};
@@ -135,11 +124,6 @@ private:
         return ((m.dataLength ? uint32_t(m.data[0]) : 0)<<16) |
                ((m.dataLength>1 ? uint32_t(m.data[1]) : 0)<<8) |
                (m.dataLength>2 ? uint32_t(m.data[2]) : 0);
-    }
-    __attribute__((noinline)) void Trace(uint8_t kind, uint32_t data) {
-        const uint32_t slot = traceHead_.fetch_add(1) % 12;
-        traces_[slot].tag.store((uint32_t(kind)<<24)|(data&0xFFFFFF));
-        traces_[slot].at.store(NowMs());
     }
     __attribute__((noinline)) bool Aux1() const {
         return state_ && RadioAudioSource::FreshSource(
@@ -157,7 +141,7 @@ private:
         m.dataLength=frame.length;
         for(uint8_t i=0;i<frame.length;++i) m.data[i]=frame.data[i];
         const bool ok = bus_->SendMessage(m)!=0;
-        if(ok) { ++txCount_; Trace(2,Pack(m)); }
+        if(ok)++txCount_;
         return ok;
     }
     bool periodicTx_ = false;
@@ -201,6 +185,6 @@ private:
         periodicTx_=false;
         return 1;
     }
-    void Finish(uint8_t code) {lastCode_.store(code);Trace(8,code);}
+    void Finish(uint8_t code) {lastCode_.store(code);}
 
 };
