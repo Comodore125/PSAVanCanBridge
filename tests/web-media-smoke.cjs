@@ -67,6 +67,7 @@ let simulated = [
   { next_count: 1, previous_count: 1, seek_up: false, seek_down: true },
 ];
 let offline = false;
+let lastOemPacket = null;
 let simulatedStandalone = {ready:true,configured:false,enabled:false,online:false,
   last_http:0,last_action:"",error:""};
 async function fakeFetch(url, opts={}) {
@@ -77,6 +78,7 @@ async function fakeFetch(url, opts={}) {
     return {ok:true,arrayBuffer:async()=>payload.buffer};
   }
   if (String(url).includes("/api/oem/display-test")) {
+    lastOemPacket=opts.body;
     return {ok:true,status:200,text:async()=>"acknowledged"};
   }
   if (String(url).includes("/api/spotify/status")) {
@@ -117,6 +119,11 @@ async function main() {
   assert.match(element("oemTrace").textContent,/SOURCE 165/,
     "OEM status must not consume media event counters");
   await vm.runInContext('oemPost("display-test",{mode:0})',context);
+  assert.equal(lastOemPacket.byteLength,5,"Stop uses bounded binary envelope");
+  assert.equal(lastOemPacket[0],0,"Stop action mode");
+  await vm.runInContext('oemPost("display-test",{mode:2,artist:"A",title:"B",interval_ms:5000,confirmed:true})',context);
+  assert.deepEqual([...lastOemPacket],[2,0,1,1,0xA5,65,66],
+    "Repeat request encodes mode, interval and exact UTF-8 metadata");
   assert.equal(element("oemResult").textContent.startsWith("Stopped"),true,
     "Repeat stop uses independent OEM endpoint");
   await assert.rejects(
