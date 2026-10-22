@@ -461,7 +461,14 @@ async function refreshOemStatus() {
   try {
     const r=await fetch(location.origin+"/api/oem/status",{cache:"no-store"});
     if(!r.ok)throw Error("HTTP "+r.status);
-    const d=await r.json();
+    const buffer=await r.arrayBuffer();
+    if(buffer.byteLength!==144)throw Error("Bad OEM telemetry size");
+    const view=new DataView(buffer),at=i=>view.getUint32(i*4,true);
+    if(at(0)!==0x4F454D31)throw Error("Unknown OEM telemetry version");
+    const d={repeat:!!(at(1)&1),remaining:at(3),last_code:at(4),
+      last_fc:at(5),tx_frames:at(6),rx_fc:at(7),rx_2e3:at(8),
+      trace:Array.from({length:Math.min(at(11),12)},
+        (_,i)=>[at(12+i*2),at(13+i*2)])};
     const reasons=["idle","complete: check physical EMF-C","single frame sent",
       "AUX1 status missing","0x2E3 active / quiet time","TX failed",
       "FC timeout","unsupported FC","","invalid metadata","CAN unavailable"];
