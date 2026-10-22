@@ -85,6 +85,7 @@ class WebServer {
     static esp_err_t post_spotify_provision_handler(httpd_req_t *req);
     static esp_err_t post_spotify_enable_handler(httpd_req_t *req);
     static esp_err_t post_spotify_clear_handler(httpd_req_t *req);
+    static esp_err_t post_oem_display_probe_handler(httpd_req_t *req);
     static esp_err_t get_reboot_handler(httpd_req_t *req);
     static esp_err_t get_vin_handler(httpd_req_t *req);
     static esp_err_t get_config_handler(httpd_req_t *req);
