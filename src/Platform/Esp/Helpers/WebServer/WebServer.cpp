@@ -688,6 +688,10 @@ esp_err_t WebServer::post_oem_repeat_handler(httpd_req_t *req)
         cJSON_Delete(root);
         return httpd_resp_sendstr(req,"stopped");
     }
+    if(!SpotifyBridge::IsHotspotAvailable()) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Private STA Wi-Fi required");
+    }
     const cJSON* artist=cJSON_GetObjectItemCaseSensitive(root,"artist");
     const cJSON* title=cJSON_GetObjectItemCaseSensitive(root,"title");
     const cJSON* interval=cJSON_GetObjectItemCaseSensitive(root,"interval_ms");
@@ -710,6 +714,10 @@ esp_err_t WebServer::post_oem_display_probe_handler(httpd_req_t *req)
 {
     cJSON* root=ReceiveJsonBody(req,256);
     if(!root) return ESP_OK;
+    if(!SpotifyBridge::IsHotspotAvailable()) {
+        cJSON_Delete(root);
+        return httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"Private STA Wi-Fi required");
+    }
     const cJSON* artist=cJSON_GetObjectItemCaseSensitive(root,"artist");
     const cJSON* title=cJSON_GetObjectItemCaseSensitive(root,"title");
     const cJSON* confirmed=cJSON_GetObjectItemCaseSensitive(root,"confirmed");
