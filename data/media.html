@@ -39,7 +39,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <label><input type="checkbox" id="active"> Enable stalk-to-Spotify forwarding</label>
 <label><input type="checkbox" id="invert"> Swap seek directions</label>
 </div>
-<p class="muted">Counters count rising edges in VAN 0x9C4; initial readings do not trigger songs. Hold, release, and press again for a new event.</p>
+<p class="muted">VAN 0x9C4 counters register press edges; repeats are suppressed.</p>
 <div class="row">
 <button id="testNext">Test Next event</button><button id="testPrevious">Test Previous event</button>
 <button id="clearLog">Clear log</button>
@@ -47,7 +47,7 @@ summary{cursor:pointer}a{color:#91dbff}
 </section>
 <section class="card">
 <h2>Spotify authorization</h2>
-<p class="muted">One-time setup (not required again on each drive): use Spotify Premium and your own Spotify Developer app. Enter its public Client ID and the exact registered HTTPS callback URL below. Press 1 to authorize, copy the FULL URL from the callback page, paste it into step 2 and press 3. Then install authorization on the ESP32 and enable autonomous SEEK. Never enter a client secret here.</p>
+<p class="muted">One-time Spotify Premium setup: enter your app's public Client ID and registered HTTPS callback. Authorize (1), paste the FULL callback URL (2), complete (3), then install authorization on ESP32. Never enter a client secret.</p>
 <div class="grid">
 <div><label for="clientId">Spotify Client ID (public)</label><input id="clientId" autocomplete="off" spellcheck="false" placeholder="Spotify app Client ID"></div>
 <div><label for="redirectUri">Registered HTTPS redirect URI</label><input id="redirectUri" autocomplete="off" spellcheck="false" placeholder="https://your-domain/spotify-callback.html"></div>
@@ -60,11 +60,11 @@ summary{cursor:pointer}a{color:#91dbff}
 <label for="callbackValue">2 · Paste the FULL callback URL (OAuth state must match)</label>
 <input id="callbackValue" autocomplete="off" spellcheck="false" placeholder="https://…?code=…&state=…">
 <button id="exchange">3 · Complete authorization</button>
-<p class="muted">Tokens stay in this browser's session storage only. Navigation to a different browser or a Private tab loses the session. Spotify access needs Internet even while connected to the bridge's Wi-Fi.</p>
+<p class="muted">Browser tokens live in session storage. Complete OAuth in the same browser; Spotify needs Internet.</p>
 </section>
 <section class="card" id="standaloneCard">
 <h2>Background Spotify control · ESP32</h2>
-<p class="muted">Once authorized, install Spotify permissions onto the bridge and enable autonomous seek handling. Your normal iPhone Spotify app plays through FiiO USB DAC → RD45 AUX. Waze may stay in the foreground; Safari is not required after setup. Short SEEK skips on release; hold SEEK for at least 0.7 seconds to seek within the track (10 seconds per second held, max 2 minutes).</p>
+<p class="muted">Install authorization on ESP32 and enable autonomous SEEK. iPhone → FiiO DAC → RD45 AUX works with Safari closed. Short SEEK skips on release; hold ≥0.7 s to seek 10 seconds per second (max 120 seconds).</p>
 <div class="grid">
   <div><label>Bridge controller</label><span id="standaloneState" class="status">Checking…</span></div>
   <div><label>Last action / Spotify HTTP</label><strong id="standaloneAction">—</strong></div>
@@ -77,7 +77,7 @@ summary{cursor:pointer}a{color:#91dbff}
 <button id="standaloneDisable">Disable autonomous SEEK</button>
 <button id="standaloneClear" class="danger">Erase bridge Spotify authorization</button>
 </div>
-<p class="muted">Spotify SEEK is sent only while the RD45 itself reports AUX1/AUX2 in a fresh CAN 0x165 status. The COM2000 remote always retains its original behavior. Provisioning works only while the bridge is connected to a secure Wi-Fi station/hotspot with Internet access. You must authorize Spotify first using the existing PKCE controls above. Once enabled, the bridge handles steering-stalk presses itself, without web-page polling. It does not change CAN/VAN traffic or audio routing. Credentials are stored locally in ESP32 NVS; do not enable this on an untrusted network.</p>
+<p class="muted">Spotify controls require fresh CAN 0x165 AUX1/AUX2; original COM2000 forwarding is unchanged. Setup needs trusted Internet-connected Wi-Fi. Once enabled, the ESP32 acts without Safari. Refresh permission remains in ESP32 NVS; do not use untrusted networks.</p>
 </section>
 <section class="card">
 <h2>Now playing</h2>
@@ -99,7 +99,7 @@ summary{cursor:pointer}a{color:#91dbff}
 </section>
 <section class="card" id="oemProbeCard">
 <h2>OEM EMF-C metadata test · experimental</h2>
-<p class="muted">Experimental AUX1 OEM metadata. One-shot or a capped eight-transmission repeat. OFF after every reboot, no SOURCE spoofing or persistent transmitter. On the shared car CAN bus another 0x2E3 sender can still appear: use only when parked, engine stopped and after reviewing the CAN monitor.</p>
+<p class="muted">AUX1 OEM 0x63 PoC: one-shot or up to eight repeats; OFF after reboot, never spoofs SOURCE. Shared CAN ID 0x2E3 may collide: test parked, engine off, after checking CAN traffic.</p>
 <div class="row">
 <button id="oemSample">Preview captured OEM sample</button>
 <button id="oemSpotify">Preview current Spotify track</button>
@@ -112,11 +112,11 @@ summary{cursor:pointer}a{color:#91dbff}
 <button id="oemRepeat">Start repeat (max 8)</button><button id="oemStop">Stop repeat</button>
 </div>
 <div><label>CAN transport diagnostics</label><pre id="oemTrace">No capture yet</pre></div>
-<p class="muted" id="oemResult" role="status">Idle. RX/TX events are sampled in RAM; RX 0x15F is transport flow control, not proof of EMF-C rendering.</p>
+<p class="muted" id="oemResult" role="status">Idle. Check the CAN monitor; RX 0x15F confirms flow control, not rendered text.</p>
 </section>
 <details class="card">
 <summary>Diagnostics, test status and limitations</summary>
-<p class="muted">Safari background execution is not guaranteed; when the screen locks, browser-based stalk forwarding can stop. Spotify can return 403, 404, 429 or 204. A SoftAP-only bridge does not supply Internet. Experimental OEM 0x2E3 injection is one-shot or at most 8 transmissions with an AUX1 / idle-bus guard. It is not guaranteed collision-free on a shared car CAN bus.</p>
+<p class="muted">Browser forwarding stops when Safari sleeps; autonomous ESP32 control does not. SoftAP alone has no Spotify Internet. OEM TX is guarded but not guaranteed collision-free.</p>
 <div id="log" role="log" aria-live="polite"></div>
 </details>
 <p class="muted"><a href="/">Bridge configuration</a> · Media additions do not change existing VAN/CAN messages or RD45/AUX operation.</p>
