@@ -132,8 +132,8 @@ private:
     std::atomic<uint8_t> lastSource_{0}, lastCode_{0};
     std::atomic<bool> busy_{false}, periodic_{false}, awaitFc_{false};
     OemText63::Payload repeatPayload_{};
-    uint32_t intervalMs_ = 10000, nextMs_ = 0;
-    uint8_t remaining_ = 0;
+    std::atomic<uint32_t> intervalMs_{10000}, nextMs_{0};
+    std::atomic<uint8_t> remaining_{0};
     ITransportLayer* bus_ = nullptr;
     CarState* state_ = nullptr;
 
