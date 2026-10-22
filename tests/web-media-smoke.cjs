@@ -72,9 +72,8 @@ let simulatedStandalone = {ready:true,configured:false,enabled:false,online:fals
   last_http:0,last_action:"",error:""};
 async function fakeFetch(url, opts={}) {
   if (String(url).includes("/api/oem/status")) {
-    const payload=new Uint32Array(36);
-    payload[0]=0x4F454D31;payload[11]=1;
-    payload[12]=5000;payload[13]=0x05000004;
+    const payload=new Uint32Array(12);
+    payload[0]=0x4F454D31;payload[9]=4;payload[5]=0x30000A;
     return {ok:true,arrayBuffer:async()=>payload.buffer};
   }
   if (String(url).includes("/api/oem/display-test")) {
@@ -116,7 +115,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 async function main() {
   vm.runInContext(code, context);
   await settle(); // Initial read starts automatically
-  assert.match(element("oemTrace").textContent,/SOURCE 165/,
+  assert.match(element("oemTrace").textContent,/SOURCE: AUX1/,
     "OEM status must not consume media event counters");
   await vm.runInContext('oemPost("display-test",{mode:0})',context);
   assert.equal(lastOemPacket.byteLength,5,"Stop uses bounded binary envelope");
